@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+*.egg
+.mypy_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+*.tgz
+
+# Build artifacts
+plugin/main.js
+plugin/main.js.map
+portal/dist/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Data
+data/
+*.db
+*.sqlite
+
+# Docker
+docker/.env
+
+# AWS
+aws/cdk/cdk.out/
+
+# Test
+.coverage
+htmlcov/
+.pytest_cache/

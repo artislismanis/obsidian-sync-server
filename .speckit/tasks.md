@@ -1,9 +1,9 @@
 # Obsidian Sync Server — Task Breakdown
 
-**Status**: Draft v2
+**Status**: Draft v3
 **Date**: 2026-04-01
 
-Tasks are organized by phase. Each phase has a clear entry condition. Tasks marked `[P]` can run in parallel within their phase. Tasks reference user scenarios (US1–US14) and functional requirements (FR-001–FR-013).
+Tasks are organized by phase. Each phase has a clear entry condition. Tasks marked `[P]` can run in parallel within their phase. Tasks reference user scenarios (US1–US14) and functional requirements (FR-001–FR-017).
 
 ---
 
@@ -19,8 +19,9 @@ Tasks are organized by phase. Each phase has a clear entry condition. Tasks mark
 | 1.3 | [P] | — | Initialize React portal project (Vite + React + TypeScript scaffold) | `portal/` |
 | 1.4 | [P] | — | Initialize CLI client project (pyproject.toml, Typer hello world) | `cli/` |
 | 1.5 | [P] | — | Create Docker setup (Dockerfile, docker-compose.yml, Caddyfile, .env.example) | `docker/` |
-| 1.6 | | — | Create GitHub Actions CI (lint + test for all four projects) | `.github/workflows/` |
-| 1.7 | | — | Configure monorepo tooling (root .gitignore, .editorconfig, pre-commit hooks) | root files |
+| 1.6 | [P] | — | Create AWS CDK scaffold (app.py, stacks placeholders, Lambda handler) | `aws/` |
+| 1.7 | | — | Create GitHub Actions CI (lint + test for all four projects) | `.github/workflows/` |
+| 1.8 | | — | Configure monorepo tooling (root .gitignore, .editorconfig, pre-commit hooks) | root files |
 
 ---
 
@@ -45,6 +46,11 @@ Tasks are organized by phase. Each phase has a clear entry condition. Tasks mark
 | 2.12 | [P] | FR-003 | Write vault CRUD tests | `server/tests/test_vaults.py` |
 | 2.13 | [P] | FR-006 | Write storage backend tests (local) | `server/tests/test_storage.py` |
 | 2.14 | | US13 | Implement health check endpoint | `server/src/obsidian_sync/routers/health.py` |
+| 2.15 | | FR-001 | Integrate Authlib for OAuth (Google + GitHub provider config) | `server/src/obsidian_sync/services/auth.py` |
+| 2.16 | | FR-001 | Create OAuth router (initiate flow, callback, account linking) | `server/src/obsidian_sync/routers/auth.py` |
+| 2.17 | | FR-014 | Implement rate limiting middleware (sliding window, 3-tier) | `server/src/obsidian_sync/middleware/rate_limit.py` |
+| 2.18 | [P] | FR-001 | Write OAuth tests (Google/GitHub flow, account linking) | `server/tests/test_oauth.py` |
+| 2.19 | [P] | FR-014 | Write rate limiting tests | `server/tests/test_rate_limit.py` |
 
 ---
 
@@ -74,6 +80,11 @@ Tasks are organized by phase. Each phase has a clear entry condition. Tasks mark
 | 3.17 | [P] | FR-004 | Write sync protocol tests (version conflicts, operations) | `server/tests/test_sync.py` |
 | 3.18 | [P] | FR-004 | Write WebSocket handler tests | `server/tests/test_websocket.py` |
 | 3.19 | [P] | US14 | Write CLI command tests | `cli/tests/` |
+| 3.20 | | FR-016 | Plugin: implement Platform-aware sync profiles (mobile vs desktop defaults) | `plugin/src/sync/platform.ts` |
+| 3.21 | | FR-016 | Plugin: implement adaptive debounce and concurrent upload limits for mobile | `plugin/src/sync/engine.ts` |
+| 3.22 | | FR-016 | Plugin: implement binary file size gate (>20MB queued for WiFi on mobile) | `plugin/src/sync/engine.ts` |
+| 3.23 | | FR-016 | Plugin: implement WebSocket reconnect with mobile-aware backoff | `plugin/src/sync/client.ts` |
+| 3.24 | | FR-016 | Plugin: implement battery-aware sync throttling | `plugin/src/sync/engine.ts` |
 
 **Checkpoint**: Test full on-save sync cycle: plugin saves file → server stores → another plugin receives update. CLI can pull/push. Conflicts detected and preserved.
 
@@ -96,6 +107,10 @@ Tasks are organized by phase. Each phase has a clear entry condition. Tasks mark
 | 4.8 | | US13 | Create AuditLog model + logging service | `server/src/obsidian_sync/models/audit.py`, `services/audit.py` |
 | 4.9 | [P] | FR-002 | Write ACL tests (all role permutations) | `server/tests/test_acl.py` |
 | 4.10 | [P] | FR-008 | Write share link tests (signing, expiry, revocation, password) | `server/tests/test_sharing.py` |
+| 4.11 | | FR-015 | Implement GDPR data export endpoint + async worker | `server/src/obsidian_sync/routers/users.py`, `workers/gdpr_export.py` |
+| 4.12 | | FR-015 | Implement account deletion cascade with 30-day grace period | `server/src/obsidian_sync/services/user.py` |
+| 4.13 | | FR-015 | Add GDPRExportRequest model + consent tracking fields + migration | `server/src/obsidian_sync/models/user.py` |
+| 4.14 | [P] | FR-015 | Write GDPR tests (export, deletion, consent, grace period) | `server/tests/test_gdpr.py` |
 
 ---
 
@@ -179,7 +194,7 @@ Tasks are organized by phase. Each phase has a clear entry condition. Tasks mark
 ## Phase 9: External Sync (US11)
 
 **Entry**: Phase 3 complete — sync engine and operation log work.
-**Exit**: Mirror-mode sync to Google Drive and OneDrive works.
+**Exit**: Bidirectional sync to Google Drive and OneDrive works.
 
 | ID | Par | Story | Task | Files |
 |----|-----|-------|------|-------|
@@ -187,11 +202,14 @@ Tasks are organized by phase. Each phase has a clear entry condition. Tasks mark
 | 9.2 | | FR-010 | Implement Google Drive connector (OAuth2, file CRUD) | `server/src/obsidian_sync/connectors/google_drive.py` |
 | 9.3 | | FR-010 | Implement OneDrive connector (Microsoft Graph, file CRUD) | `server/src/obsidian_sync/connectors/onedrive.py` |
 | 9.4 | | FR-010 | Create ExternalSyncConfig model + migration | `server/src/obsidian_sync/models/external.py` |
-| 9.5 | | FR-010 | Implement external sync worker (mirror mode — watch operation log, push changes) | `server/src/obsidian_sync/workers/external_sync.py` |
+| 9.5 | | FR-010 | Implement external sync worker (bidirectional — watch operation log + poll external changes) | `server/src/obsidian_sync/workers/external_sync.py` |
 | 9.6 | | FR-010 | External sync API endpoints (configure, trigger, status) | `server/src/obsidian_sync/routers/` |
 | 9.7 | | FR-010 | OAuth flow endpoints (initiate + callback for GDrive/OneDrive) | `server/src/obsidian_sync/routers/` |
 | 9.8 | | FR-010 | Portal: external sync configuration UI | `portal/src/` |
-| 9.9 | [P] | FR-010 | Write connector tests (mocked API responses) | `server/tests/test_connectors.py` |
+| 9.9 | | FR-010 | Implement Google Drive change polling (5min interval) for bidirectional sync | `server/src/obsidian_sync/connectors/google_drive.py` |
+| 9.10 | | FR-010 | Implement OneDrive change notifications (Microsoft Graph webhooks) | `server/src/obsidian_sync/connectors/onedrive.py` |
+| 9.11 | | FR-010 | Implement bidirectional conflict resolution (external vs server) | `server/src/obsidian_sync/services/external_sync.py` |
+| 9.12 | [P] | FR-010 | Write connector tests (mocked API responses, bidirectional conflicts) | `server/tests/test_connectors.py` |
 
 ---
 
@@ -230,6 +248,9 @@ Tasks are organized by phase. Each phase has a clear entry condition. Tasks mark
 | 11.8 | | — | Performance testing (sync latency, concurrent connections) | `server/tests/benchmarks/` |
 | 11.9 | | — | Security review (dependency audit, OWASP checklist, penetration test plan) | `docs/security.md` |
 | 11.10 | | — | Prometheus metrics endpoint + Grafana dashboard template | `docker/grafana/` |
+| 11.11 | | FR-013 | AWS CDK stacks (API GW + Lambda + Fargate + ALB + Aurora + S3 + CloudFront) | `aws/cdk/stacks/` |
+| 11.12 | | FR-013 | AWS deployment guide (architecture, prerequisites, cost estimates) | `aws/README.md` |
+| 11.13 | | FR-013 | AWS CI/CD pipeline (GitHub Actions → ECR → ECS/Lambda deploy) | `.github/workflows/deploy-aws.yml` |
 
 ---
 
@@ -238,20 +259,21 @@ Tasks are organized by phase. Each phase has a clear entry condition. Tasks mark
 ```
 Phase 1 (Setup)
     ↓
-Phase 2 (Foundation)
+Phase 2 (Foundation — now includes OAuth + rate limiting)
     ↓
-Phase 3 (Core Sync) ←── required by all below
-    ├── Phase 4 (ACL & Sharing)
+Phase 3 (Core Sync — now includes mobile optimization + CLI)
+    ├── Phase 4 (ACL & Sharing — now includes GDPR)
     │       ↓
-    │   Phase 6 (Portal) ←── requires Phase 4
+    │   Phase 6 (Portal)
     │       ↓
-    │   Phase 10 (Payments) ←── requires Phase 6
-    ├── Phase 5 (Encryption) ←── independent of Phase 4
-    ├── Phase 7 (Live Sync) ←── independent
-    ├── Phase 8 (Storage Backends) ←── can start after Phase 2
-    └── Phase 9 (External Sync) ←── independent
+    │   Phase 10 (Payments)
+    ├── Phase 5 (Encryption)
+    ├── Phase 7 (Live Sync)
+    ├── Phase 8 (Storage Backends / S3)
+    │       ↓ (S3 required for AWS deployment)
+    └── Phase 9 (External Sync — now bidirectional from day one)
             ↓
-        Phase 11 (Production) ←── after all features
+        Phase 11 (Production — now includes AWS CDK + CI/CD)
 ```
 
 **Recommended MVP path**: Phases 1 → 2 → 3 → 4 → 5 → 6 (gives you a functional product with sync, sharing, encryption, and a portal).

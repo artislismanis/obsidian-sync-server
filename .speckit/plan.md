@@ -1,6 +1,6 @@
 # Obsidian Sync Server — Implementation Plan
 
-**Status**: Draft v2
+**Status**: Draft v3
 **Date**: 2026-04-01
 
 ## Technical Context
@@ -11,14 +11,15 @@
 | Server framework | FastAPI (async) |
 | Database | SQLAlchemy async — SQLite (aiosqlite) or PostgreSQL (asyncpg) |
 | Real-time transport | WebSocket (native FastAPI) |
-| Auth | JWT (PyJWT) + bcrypt + API keys |
+| Auth | JWT (PyJWT) + bcrypt + API keys + OAuth (Authlib: Google, GitHub) |
 | Encryption | AES-256-GCM, Argon2id key derivation (client-side) |
 | Plugin language | TypeScript (Obsidian Plugin API) |
 | Editor integration | CodeMirror 6 + Yjs (y-codemirror.next) |
 | Portal | React 18 + Vite + TanStack Query |
 | CLI client | Python (Click/Typer), shares sync code with server |
 | Payments | Stripe (subscriptions + usage billing) |
-| Packaging | Docker multi-arch (amd64, arm64) + pip (CLI) |
+| Packaging | Docker multi-arch (amd64, arm64) + pip (CLI) + AWS CDK (SaaS) |
+| AWS (SaaS) | Lambda (Mangum) + Fargate (WebSocket) + ALB + Aurora Serverless + S3 + CloudFront |
 | Testing (server) | pytest + pytest-asyncio + httpx |
 | Testing (portal) | Vitest + React Testing Library |
 | Testing (plugin) | Jest |
@@ -37,6 +38,8 @@
 | P5: Simple Ops | Yes | Docker Compose, SQLite default, env vars |
 | P6: Pluggable Storage | Yes | StorageBackend protocol + implementations |
 | P7: Security Default | Yes | Per-vault encryption, signed share links, ACL |
+| P8: Privacy by Design | Yes | GDPR export/deletion, consent tracking, audit trail |
+| P9: Mobile-First Parity | Yes | Platform-aware sync profiles, battery/bandwidth awareness |
 
 ---
 
@@ -124,7 +127,12 @@ class OneDriveConnector(SyncConnector):
     """Uses Microsoft Graph API. Files stored in a designated folder."""
 ```
 
-Mirror mode: A background worker (`arq` or `celery` — lightweight) watches the `SyncOperation` table. For each new operation, it calls the appropriate connector method. Runs independently of primary sync.
+Mirror mode: A background worker watches the `SyncOperation` table. For each new operation, it calls the appropriate connector method.
+
+Bidirectional mode: Additionally polls external services for changes:
+- **Google Drive**: Changes API polling every 5 minutes (configurable)
+- **OneDrive**: Microsoft Graph change notifications (webhooks) for real-time detection
+- External changes pulled down, version-compared with server state, conflicts preserved
 
 ### Payment / Entitlement Architecture
 
@@ -350,6 +358,8 @@ POST   /api/v1/auth/refresh                        # Refresh access token
 POST   /api/v1/auth/setup                          # First-run admin creation
 POST   /api/v1/auth/api-keys                       # Create API key
 DELETE /api/v1/auth/api-keys/{id}                  # Revoke API key
+GET    /api/v1/auth/oauth/{provider}               # Start OAuth flow (Google/GitHub)
+GET    /api/v1/auth/oauth/{provider}/callback      # OAuth callback
 
 # Users (admin)
 GET    /api/v1/users
@@ -358,6 +368,10 @@ GET    /api/v1/users/{id}
 PATCH  /api/v1/users/{id}
 DELETE /api/v1/users/{id}
 PATCH  /api/v1/users/{id}/password
+POST   /api/v1/users/me/export                     # GDPR data export
+GET    /api/v1/users/me/export/{id}                # Check export status / download
+DELETE /api/v1/users/me                            # GDPR account deletion (30-day grace)
+PATCH  /api/v1/users/me/cancel-deletion            # Cancel deletion request
 
 # Vaults
 GET    /api/v1/vaults                              # List user's vaults
@@ -486,3 +500,187 @@ Alembic migrations use dialect-aware SQL where needed.
 - Only active when `STRIPE_SECRET_KEY` env var is set
 - All billing routes return 404 in self-hosted mode
 - Entitlement engine returns unlimited for all features in self-hosted mode
+
+---
+
+## OAuth Flow Design
+
+```
+Google/GitHub OAuth2 via Authlib:
+
+1. User clicks "Login with Google/GitHub" in plugin or portal
+2. Client redirects to: GET /api/v1/auth/oauth/{provider}
+3. Server redirects to provider's OAuth consent page
+4. Provider redirects back: GET /api/v1/auth/oauth/{provider}/callback?code=...
+5. Server exchanges code for access token, fetches user profile
+6. Server creates/links User record (sets oauth_provider, oauth_id, email)
+7. Server issues JWT (same format as local auth)
+8. Client stores JWT and proceeds normally
+
+Account linking:
+- If email matches existing local account → link OAuth to existing user
+- If new email → create new user with OAuth credentials
+- Users can have both local password AND OAuth linked
+```
+
+## Rate Limiting Architecture
+
+```
+Algorithm: Sliding window counter
+
+Tiers:
+- Per-IP (auth endpoints): 5 requests/minute
+- Per-user: 100 requests/minute (configurable by subscription tier)
+- Per-vault: 60 sync operations/minute
+- Global: 10,000 requests/minute (protects server)
+
+Implementation:
+- SaaS: Redis (INCR + EXPIRE, sliding window via sorted sets)
+- Self-hosted: In-memory dict with TTL (no Redis dependency)
+
+Response headers on every response:
+  X-RateLimit-Limit: 100
+  X-RateLimit-Remaining: 87
+  X-RateLimit-Reset: 1711929600
+
+429 Too Many Requests when exceeded, with Retry-After header
+```
+
+## GDPR Compliance Design
+
+```
+Data Export (POST /api/v1/users/me/export):
+  1. Creates GDPRExportRequest record (status: pending)
+  2. Background job collects: user profile, all owned vaults, all files, metadata, audit log
+  3. Generates ZIP archive, uploads to temporary storage
+  4. Sets download_url + expires_at (48h)
+  5. Notifies user (or returns status via polling)
+
+Account Deletion (DELETE /api/v1/users/me):
+  1. Sets deletion_requested_at on User record
+  2. 30-day grace period (user can cancel via PATCH /api/v1/users/me/cancel-deletion)
+  3. After 30 days, background job cascades:
+     - Delete all owned vaults + files + versions
+     - Remove VaultAccess records
+     - Remove ShareLinks
+     - Remove ExternalSyncConfigs
+     - Anonymize AuditLog entries (set actor_id to null)
+     - Delete User record
+
+Consent:
+  - Recorded at registration (gdpr_consent_at timestamp)
+  - Consent text versioned (consent_version field)
+  - Revocable (triggers account deletion flow)
+```
+
+## Mobile Plugin Architecture
+
+```typescript
+// plugin/src/sync/platform.ts
+
+interface SyncProfile {
+  debounceMs: number;            // 2000 (desktop) / 5000 (mobile)
+  maxConcurrentUploads: number;  // 10 (desktop) / 3 (mobile)
+  liveSyncDefault: boolean;      // true (desktop) / false (mobile)
+  maxAutoSyncFileSize: number;   // Infinity (desktop) / 20_971_520 (mobile, 20MB)
+  wsReconnectMaxDelay: number;   // 10_000 (desktop) / 30_000 (mobile)
+  wsReconnectBaseDelay: number;  // 1_000 (both)
+  wifiOnlyLargeFiles: boolean;   // false (desktop) / true (mobile)
+  batteryAwareSync: boolean;     // false (desktop) / true (mobile)
+  batteryThreshold: number;      // N/A (desktop) / 0.2 (mobile, 20%)
+}
+
+const DESKTOP_PROFILE: SyncProfile = {
+  debounceMs: 2000,
+  maxConcurrentUploads: 10,
+  liveSyncDefault: true,
+  maxAutoSyncFileSize: Infinity,
+  wsReconnectMaxDelay: 10_000,
+  wsReconnectBaseDelay: 1_000,
+  wifiOnlyLargeFiles: false,
+  batteryAwareSync: false,
+  batteryThreshold: 0,
+};
+
+const MOBILE_PROFILE: SyncProfile = {
+  debounceMs: 5000,
+  maxConcurrentUploads: 3,
+  liveSyncDefault: false,
+  maxAutoSyncFileSize: 20_971_520,
+  wsReconnectMaxDelay: 30_000,
+  wsReconnectBaseDelay: 1_000,
+  wifiOnlyLargeFiles: true,
+  batteryAwareSync: true,
+  batteryThreshold: 0.2,
+};
+
+function getSyncProfile(): SyncProfile {
+  if (Platform.isMobileApp) return { ...MOBILE_PROFILE };
+  return { ...DESKTOP_PROFILE };
+}
+
+// All profile values overridable in plugin settings
+```
+
+Key mobile constraints:
+- Never use Node.js or Electron APIs (crash on mobile)
+- Use `requestUrl` instead of `fetch` (Obsidian's network abstraction)
+- Files >20MB: queue for manual sync or WiFi-only
+- No background sync — only syncs when Obsidian app is active
+- WebSocket reconnect: exponential backoff 1s → 30s (vs 1s → 10s desktop)
+
+## AWS Deployment Architecture
+
+```
+Internet
+  ├── CloudFront → S3 (portal static assets)
+  └── API Gateway → Lambda (Mangum)       ← REST API ($0 at idle)
+      ALB → Fargate (0.25 vCPU, 512MB)    ← WebSocket sync only (~$9/month)
+              ↓
+        Aurora Serverless PostgreSQL        ← Same SQLAlchemy code (~$15/month)
+              ↓
+        S3 (vault storage)                  ← Pay per GB
+              ↓
+        SQS → Lambda                        ← Background jobs (external sync, pruning)
+
+aws/
+├── cdk/
+│   ├── app.py                    # CDK app entry point
+│   ├── stacks/
+│   │   ├── network.py            # VPC, subnets, security groups
+│   │   ├── api.py                # API Gateway + Lambda (REST via Mangum)
+│   │   ├── websocket.py          # ECS Fargate + ALB (WebSocket sync)
+│   │   ├── database.py           # Aurora Serverless PostgreSQL
+│   │   ├── storage.py            # S3 buckets for vault data
+│   │   ├── cdn.py                # CloudFront for portal
+│   │   └── background.py         # SQS queues + Lambda workers
+│   └── requirements.txt          # aws-cdk-lib
+├── lambda/
+│   └── handler.py                # Mangum adapter: from mangum import Mangum; handler = Mangum(app)
+└── README.md
+
+Key env vars for AWS mode:
+  DEPLOYMENT_MODE=saas
+  DATABASE_URL=postgresql+asyncpg://user:pass@aurora-endpoint:5432/obsidian_sync
+  STORAGE_BACKEND=s3
+  S3_BUCKET=obsidian-sync-vaults
+  AWS_REGION=eu-west-1
+  STRIPE_SECRET_KEY=sk_live_...
+
+Cost estimates:
+  1-10 users:   ~$25-35/month
+  100 users:    ~$60-120/month
+  1000+ users:  Aurora + Fargate auto-scale, ~$200-400/month
+```
+
+### Why Lambda + Fargate Hybrid?
+- Lambda for REST: $0 at idle, auto-scales, no container management. ~90% of API requests are stateless REST.
+- Fargate for WebSocket: persistent connections need long-lived processes. Lambda's 15-min timeout can't hold WebSocket connections.
+- ALB routes `/api/v1/sync/*` (WebSocket upgrade) to Fargate target group, everything else to API Gateway.
+- Cost-effective: only the WebSocket service runs continuously (~$9/month for 0.25 vCPU).
+
+### Why Aurora over DynamoDB?
+- Data model is highly relational (User → Vault → VaultAccess → FileVersion → SyncOperation)
+- SQLAlchemy code works identically on SQLite (self-hosted) and Aurora (SaaS) — one data layer
+- DynamoDB would require rewriting all data access code and a completely different query model
+- Aurora Serverless v2 auto-scales and starts at ~$15/month — acceptable for the simplicity gain

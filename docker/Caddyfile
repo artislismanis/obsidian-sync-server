@@ -1,0 +1,15 @@
+{$DOMAIN:localhost} {
+    # WebSocket upgrade support for sync
+    @websocket {
+        header Connection *Upgrade*
+        header Upgrade websocket
+    }
+
+    # Reverse proxy to FastAPI server
+    reverse_proxy server:8000 {
+        # Extended timeout for WebSocket connections
+        transport http {
+            read_timeout 0
+        }
+    }
+}

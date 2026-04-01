@@ -1,0 +1,35 @@
+services:
+  server:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    restart: unless-stopped
+    volumes:
+      - sync-data:/app/data
+    env_file:
+      - .env
+    networks:
+      - sync-net
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      - sync-net
+    depends_on:
+      - server
+
+volumes:
+  sync-data:
+  caddy-data:
+  caddy-config:
+
+networks:
+  sync-net:

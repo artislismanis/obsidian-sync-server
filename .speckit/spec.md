@@ -154,8 +154,8 @@ A synchronization platform for Obsidian vaults supporting self-hosted and SaaS d
 **So that** I have an additional backup or can access files via those platforms.
 
 **Acceptance Criteria:**
-- **Mirror mode** (MVP): Changes on server are pushed to external service. One-directional.
-- **Bidirectional mode** (post-MVP): Changes on external service sync back. Conflict resolution applies.
+- **Mirror mode**: Changes on server pushed to external service. One-directional.
+- **Bidirectional mode** (day one): Changes on external service sync back. Conflict resolution applies.
 - **BYO storage mode**: User provides credentials for their own cloud storage; vault uses it as primary backend (overlaps with US9).
 - Supported services (MVP): Google Drive, OneDrive
 - OAuth flow for connecting external accounts
@@ -226,6 +226,9 @@ A synchronization platform for Obsidian vaults supporting self-hosted and SaaS d
 - Rate limiting on login endpoint (5 attempts/minute per IP)
 - Session revocation (invalidate all refresh tokens for a user)
 - API key support for programmatic access (service accounts)
+- OAuth2 login (Google, GitHub) via Authlib — day one
+- OAuth account linking: creates/links User record, sets `oauth_provider` + `oauth_id`
+- JWT issued after OAuth callback (same token format as local auth)
 
 ### FR-002: Authorization & ACL
 - Role-based: `owner > admin > write > read` per vault
@@ -290,7 +293,8 @@ A synchronization platform for Obsidian vaults supporting self-hosted and SaaS d
 - Google Drive: OAuth2, files stored in a designated folder
 - OneDrive: OAuth2 via Microsoft Graph API
 - Mirror mode: background worker watches operation log, pushes changes out
-- Bidirectional (future): webhook/polling for external changes, conflict resolution
+- Bidirectional mode: polling for GDrive changes (5min interval), Microsoft Graph webhooks for OneDrive
+- Conflict resolution: server version wins by default, conflicts preserved as `.conflict` files
 - Connector status: last sync, pending changes, errors
 
 ### FR-011: Payment Integration (SaaS mode)
@@ -309,13 +313,54 @@ A synchronization platform for Obsidian vaults supporting self-hosted and SaaS d
 - Admin panel: user CRUD, vault overview, storage stats, audit log
 - Responsive: mobile-friendly layout
 
-### FR-013: Docker Deployment
+### FR-013: Deployment
+**Docker (self-hosted)**:
 - Multi-stage Dockerfile: Python server + built React portal assets
 - Docker Compose: server + Caddy (reverse proxy + auto-TLS)
 - Docker Compose (dev): hot reload for server + portal
 - Environment variables for all config (PORT, DATABASE_URL, SECRET_KEY, STORAGE_DEFAULT, STRIPE_*, etc.)
 - Health check endpoint for container orchestration
 - Multi-arch: amd64 + arm64
+
+**AWS (SaaS)**:
+- Lambda + Fargate hybrid: Lambda (via Mangum) for REST APIs, Fargate for WebSocket sync
+- API Gateway routes REST traffic to Lambda; ALB routes WebSocket to Fargate
+- ALB idle timeout: 4000s for persistent WebSocket connections, sticky sessions enabled
+- Aurora Serverless PostgreSQL (same SQLAlchemy code, env var toggle)
+- S3 for vault storage, CloudFront for portal static assets, ACM for TLS
+- SQS + Lambda for background jobs (external sync, history pruning)
+- AWS CDK (Python) for infrastructure-as-code
+- Same codebase — deployment mode controlled entirely by environment variables
+
+### FR-014: Rate Limiting
+- Sliding window algorithm
+- Three tiers: per-user, per-vault, global
+- SaaS: Redis-backed counters
+- Self-hosted: in-memory (no Redis dependency)
+- Response headers: `X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`
+- Configurable limits per subscription tier
+- Auth endpoints: stricter limits (5 attempts/minute per IP)
+
+### FR-015: GDPR & Privacy
+- Data export: `POST /api/v1/users/me/export` triggers async job → ZIP of all user data
+- Account deletion: `DELETE /api/v1/users/me` with 30-day grace period, then cascade delete
+- Consent tracking: recorded at registration, timestamped, revocable
+- Audit trail for all data access and admin actions
+- Data minimization: collect only what's needed for sync functionality
+- Right to rectification: users can update all personal data
+
+### FR-016: Mobile Optimization
+- Platform detection: `Platform.isMobileApp` / `Platform.isIosApp` / `Platform.isAndroidApp`
+- Adaptive sync profiles (mobile vs desktop):
+  - Debounce: 5000ms mobile / 2000ms desktop
+  - Max concurrent uploads: 3 mobile / 10 desktop
+  - Live sync: off by default on mobile / on by default on desktop
+  - Max auto-sync file size: 20MB mobile / unlimited desktop
+  - WebSocket reconnect max delay: 30s mobile / 10s desktop
+- Binary files >20MB: queue for WiFi-only sync on mobile
+- Battery-aware: reduce sync frequency when battery <20%
+- All mobile defaults overridable in plugin settings
+- No Node.js or Electron API usage (breaks on mobile)
 
 ---
 
@@ -324,12 +369,15 @@ A synchronization platform for Obsidian vaults supporting self-hosted and SaaS d
 ### User
 - `id` (UUID), `username` (unique), `email` (unique, nullable)
 - `password_hash`, `is_superadmin` (bool)
+- `oauth_provider` (nullable — google/github), `oauth_id` (nullable)
 - `stripe_customer_id` (nullable — SaaS mode)
+- `gdpr_consent_at` (nullable), `deletion_requested_at` (nullable)
 - `created_at`, `updated_at`, `last_login`
 
 ### Subscription (SaaS mode)
 - `id` (UUID), `user_id` (FK→User)
 - `stripe_subscription_id`, `tier` (enum: free/pro/team)
+- `max_storage_bytes` (1GB free, 5GB pro, 10GB team, unlimited BYO)
 - `status` (enum: active/past_due/cancelled/suspended)
 - `current_period_end`, `created_at`
 
@@ -339,6 +387,7 @@ A synchronization platform for Obsidian vaults supporting self-hosted and SaaS d
 - `encrypted` (bool), `encryption_salt` (bytes, nullable)
 - `encryption_key_hash` (for passphrase verification, nullable)
 - `sync_mode` (enum: on_save/live/both)
+- `obsidian_config_sync` (enum: all/settings_only/none — controls .obsidian/ folder sync)
 - `retention_policy` (JSON: {type: "count"|"days", value: int})
 - `archived_at` (nullable — soft delete)
 - `created_at`, `updated_at`
@@ -387,6 +436,12 @@ A synchronization platform for Obsidian vaults supporting self-hosted and SaaS d
 - `action` (string), `resource_type` (string), `resource_id` (UUID)
 - `details` (JSON), `ip_address`, `created_at`
 
+### GDPRExportRequest
+- `id` (UUID), `user_id` (FK→User)
+- `status` (enum: pending/processing/ready/expired)
+- `download_url` (nullable), `expires_at` (nullable)
+- `created_at`
+
 ---
 
 ## Success Criteria
@@ -404,13 +459,17 @@ A synchronization platform for Obsidian vaults supporting self-hosted and SaaS d
 
 ---
 
-## NEEDS CLARIFICATION
+## Resolved Decisions
 
-- [ ] Maximum vault size (affects chunking strategy and storage backend requirements)
-- [ ] Should `.obsidian/` config folder sync? (settings, plugins, themes)
-- [ ] Server-side full-text search across vault contents?
-- [ ] Should encrypted vaults support server-side search (would require search index encryption)?
-- [ ] OAuth/SSO login (Google, GitHub) — priority and timeline?
-- [ ] Rate limiting strategy for SaaS (per-user, per-vault, global)?
-- [ ] GDPR compliance requirements (data deletion, export, DPA)?
-- [ ] Bidirectional external sync — timeline and priority relative to other features?
+| Question | Resolution |
+|----------|------------|
+| Max vault size | Tiered: 1GB (free), 5GB (pro), 10GB (team) for platform storage. Unlimited for BYO storage backends. |
+| `.obsidian/` config sync | Configurable per vault via `obsidian_config_sync`: `all`, `settings_only`, `none` |
+| Server-side search | No. Client-side only. Portal is a management utility, not an Obsidian replacement. |
+| Encrypted vault search | N/A — no server-side search. |
+| OAuth/SSO | Day one. Google + GitHub OAuth via Authlib (FR-001). |
+| Rate limiting | 3-tier: per-user + per-vault + global. Redis for SaaS, in-memory for self-hosted (FR-014). |
+| GDPR | Yes — data export, account deletion, consent tracking from day one (FR-015). |
+| Bidirectional external sync | Day one. Polling for GDrive, webhooks for OneDrive (FR-010). |
+| Mobile optimization | Plugin optimized for Obsidian mobile with adaptive sync profiles (FR-016). |
+| AWS deployment | Lambda + Fargate hybrid alongside Docker self-hosted (FR-013). |

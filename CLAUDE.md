@@ -27,11 +27,13 @@ Follow the task phases in order. Check task dependencies before starting work.
 | Server | Python 3.11+, FastAPI, SQLAlchemy async, Alembic |
 | Database | SQLite (aiosqlite) or PostgreSQL (asyncpg) — configurable |
 | Real-time | WebSocket + Yjs (pycrdt) |
-| Auth | JWT (PyJWT), bcrypt, Argon2id (encryption) |
+| Auth | JWT (PyJWT), bcrypt, Argon2id (encryption), OAuth (Authlib) |
 | Plugin | TypeScript, Obsidian Plugin API, esbuild |
 | Portal | React 18, Vite, TanStack Router/Query |
 | CLI | Python, Typer, httpx, watchfiles |
 | Docker | Multi-stage build, Caddy reverse proxy |
+| AWS | Lambda (Mangum) + Fargate + ALB + Aurora + S3 + CloudFront |
+| IaC | AWS CDK (Python) |
 | Payments | Stripe (SaaS mode only) |
 
 ## Development Commands
@@ -116,6 +118,12 @@ Controlled by environment variables. Key toggle: `DEPLOYMENT_MODE=self_hosted|sa
 - Billing routes return 404
 - Entitlement engine returns unlimited
 - No Stripe dependency needed
+
+### AWS Deployment
+SaaS mode uses Lambda + Fargate hybrid. See `aws/README.md`. Lambda (via Mangum) handles REST APIs; Fargate handles WebSocket sync. Same codebase — env vars control everything.
+
+### Mobile Plugin
+Plugin must work on Obsidian mobile (iOS/Android). Use `Platform.isMobileApp` for detection. Adaptive sync profiles: larger debounce, fewer concurrent uploads, WiFi-only for large files, battery-aware throttling. Never use Node.js or Electron APIs.
 
 ### Database
 SQLAlchemy async with dialect abstraction. Use `DATABASE_URL` env var. Test with both SQLite and PostgreSQL before merging.

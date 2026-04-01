@@ -40,6 +40,12 @@ The storage layer is an abstraction. Vaults can independently target different b
 ### P7: Security by Default
 Per-vault encryption with user-held keys. JWT auth with token rotation. ACL enforced server-side on every operation. Share links are signed, time-limited, and revocable. No security feature should be opt-in — the safe path is the default path.
 
+### P8: Privacy by Design
+GDPR compliance from day one. Data minimization — collect only what's needed. Right to deletion with cascade. Right to data export in standard formats. Consent tracked and timestamped. Audit trail for all data access.
+
+### P9: Mobile-First Parity
+The plugin must work well on Obsidian mobile (iOS and Android). Battery-aware sync — reduce frequency on low battery. Bandwidth-aware — larger debounce, fewer concurrent uploads, WiFi-only for large files. Platform detection via Obsidian's `Platform` API to adapt behavior.
+
 ## 3. Technical Constraints
 
 ### Language & Frameworks
@@ -47,10 +53,11 @@ Per-vault encryption with user-held keys. JWT auth with token rotation. ACL enfo
 - **Plugin**: TypeScript, Obsidian Plugin API
 - **Portal**: React 18+, Vite, TanStack Router/Query, served as static assets
 - **Transport**: WebSocket for real-time sync, REST for management APIs
-- **Auth**: JWT tokens with refresh rotation
+- **Auth**: JWT tokens with refresh rotation, OAuth (Google, GitHub) via Authlib
 - **Encryption**: AES-256-GCM for vault at-rest encryption, keys derived from user passphrase via Argon2
 - **Payments**: Stripe (subscriptions + usage-based)
-- **Packaging**: Docker (multi-arch: amd64, arm64)
+- **Packaging**: Docker (multi-arch: amd64, arm64), AWS (Lambda + Fargate hybrid)
+- **IaC**: AWS CDK (Python) for SaaS deployment
 
 ### Database Strategy
 - SQLAlchemy async with dialect abstraction from day one
@@ -89,6 +96,7 @@ Per-vault encryption with user-held keys. JWT auth with token rotation. ACL enfo
 ├── plugin/              # Obsidian TypeScript plugin
 ├── cli/                 # Python CLI client (headless sync)
 ├── docker/              # Dockerfiles and compose configs
+├── aws/                 # AWS CDK stacks for SaaS deployment
 ├── docs/                # User and developer documentation
 ├── .speckit/            # Spec-driven development artifacts
 └── CLAUDE.md            # AI agent instructions
@@ -109,16 +117,18 @@ Web Portal      ←┘                          ↕                    ↕
 
 ### Deployment Modes
 
-| Aspect | Self-Hosted | SaaS |
-|--------|-------------|------|
-| Database | SQLite (default) | PostgreSQL |
-| Storage | Local filesystem | S3 (managed) or BYO |
-| Auth | Local accounts | Local + OAuth (future) |
+| Aspect | Self-Hosted (Docker) | SaaS (AWS) |
+|--------|---------------------|------------|
+| Compute | Docker container | Lambda (REST) + Fargate (WebSocket) |
+| Database | SQLite (default) / PostgreSQL | Aurora Serverless PostgreSQL |
+| Storage | Local filesystem | S3 |
+| Auth | Local accounts + OAuth | Local accounts + OAuth |
 | Billing | Disabled | Stripe |
 | External sync | Available | Available |
-| Portal | Bundled in Docker | CDN-hosted |
-| TLS | Caddy auto-cert | Cloud LB |
-| Updates | Manual / Watchtower | Rolling deploy |
+| Portal | Bundled in Docker | CloudFront CDN |
+| TLS | Caddy auto-cert | ACM |
+| Background jobs | asyncio tasks | SQS + Lambda |
+| Updates | Manual / Watchtower | GitHub Actions → ECS deploy |
 
 ## 5. Development Workflow
 
@@ -130,9 +140,7 @@ Web Portal      ←┘                          ↕                    ↕
 
 ## 6. Non-Goals (MVP)
 
-- OAuth / SSO login (post-MVP, local accounts only)
-- Mobile app (web portal works on mobile browsers)
+- Dedicated mobile app (plugin works on Obsidian mobile; web portal works on mobile browsers)
 - Multi-server federation
 - Plugin marketplace distribution
-- Bidirectional external sync (mirror-out first, bidirectional later)
 - Real-time collaborative cursors / presence indicators
