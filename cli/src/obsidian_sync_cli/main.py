@@ -1,6 +1,10 @@
 import typer
 
 from obsidian_sync_cli import __version__
+from obsidian_sync_cli.commands.auth import app as auth_app
+from obsidian_sync_cli.commands.sync import app as sync_app
+from obsidian_sync_cli.commands.watch import watch
+from obsidian_sync_cli.commands.status import status
 
 app = typer.Typer(
     name="oss",
@@ -24,22 +28,14 @@ def main(
     """Obsidian Sync Server CLI."""
 
 
-@app.command()
-def login(server_url: str = typer.Argument(help="Server URL to connect to")) -> None:
-    """Authenticate with a sync server."""
-    typer.echo(f"Connecting to {server_url}...")
-    # Will be implemented in Phase 3
+# Register sub-commands
+app.add_typer(auth_app, name="auth", help="Authentication commands")
+app.add_typer(sync_app, name="vault", help="Vault sync commands")
+app.command(name="watch")(watch)
+app.command(name="status")(status)
 
-
-@app.command()
-def vaults() -> None:
-    """List available vaults."""
-    typer.echo("Listing vaults...")
-    # Will be implemented in Phase 3
-
-
-@app.command()
-def status() -> None:
-    """Show sync status."""
-    typer.echo("Checking sync status...")
-    # Will be implemented in Phase 3
+# Top-level shortcuts
+app.command(name="login")(auth_app.registered_commands[0].callback)  # type: ignore[arg-type]
+app.command(name="pull")(sync_app.registered_commands[0].callback)  # type: ignore[arg-type]
+app.command(name="push")(sync_app.registered_commands[1].callback)  # type: ignore[arg-type]
+app.command(name="sync")(sync_app.registered_commands[2].callback)  # type: ignore[arg-type]

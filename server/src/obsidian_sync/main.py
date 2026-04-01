@@ -39,6 +39,11 @@ def create_app() -> FastAPI:
     app.include_router(auth_router)
     app.include_router(vaults_router)
 
+    # Rate limiting middleware (sliding window, in-memory for self-hosted mode)
+    from obsidian_sync.middleware.rate_limit import RateLimitMiddleware
+
+    app.add_middleware(RateLimitMiddleware)
+
     return app
 
 

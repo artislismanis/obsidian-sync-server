@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import (
 from obsidian_sync.models import Base
 from obsidian_sync.database import get_db
 from obsidian_sync.main import create_app
+from obsidian_sync.middleware.rate_limit import get_store
 
 # Use in-memory SQLite for tests
 TEST_DB_URL = "sqlite+aiosqlite://"
@@ -25,6 +26,12 @@ def event_loop():
     loop = asyncio.new_event_loop()
     yield loop
     loop.close()
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limits() -> None:
+    """Clear rate limit counters before every test to prevent cross-test pollution."""
+    get_store().clear()
 
 
 @pytest_asyncio.fixture
