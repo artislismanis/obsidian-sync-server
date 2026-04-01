@@ -5,7 +5,6 @@ import base64
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from obsidian_sync.config import settings
 from obsidian_sync.database import get_db
 from obsidian_sync.middleware.auth import get_current_user
 from obsidian_sync.models.user import User
@@ -25,7 +24,7 @@ from obsidian_sync.schemas.vault import (
 )
 from obsidian_sync.services import sync as sync_service
 from obsidian_sync.services import vault as vault_service
-from obsidian_sync.storage.local import LocalStorage
+from obsidian_sync.services.storage_factory import get_local_vault_storage
 
 router = APIRouter(prefix="/api/v1/vaults", tags=["vaults"])
 
@@ -135,10 +134,6 @@ async def delete_vault(
     await vault_service.archive_vault(db, vault)
 
 
-def _get_vault_storage(vault_id: str) -> LocalStorage:
-    """Get the storage backend for a vault."""
-    root = f"{settings.storage_local_path}/{vault_id}/current"
-    return LocalStorage(root)
 
 
 def _file_version_to_response(fv) -> FileSyncResponse:  # type: ignore[no-untyped-def]
@@ -193,7 +188,7 @@ async def get_file(
     if file_version is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
 
-    storage = _get_vault_storage(vault_id)
+    storage = get_local_vault_storage(vault_id)
     try:
         data = await storage.read(path)
     except (FileNotFoundError, OSError):
@@ -247,7 +242,7 @@ async def upload_file(
     op_type = "update" if existing else "create"
 
     # Store file
-    storage = _get_vault_storage(vault_id)
+    storage = get_local_vault_storage(vault_id)
     await storage.write(path, raw_data, content_hash=body.content_hash)
 
     # Create file version record
@@ -292,7 +287,7 @@ async def delete_file(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
 
     # Remove from storage
-    storage = _get_vault_storage(vault_id)
+    storage = get_local_vault_storage(vault_id)
     await storage.delete(path)
 
     # Record sync operation

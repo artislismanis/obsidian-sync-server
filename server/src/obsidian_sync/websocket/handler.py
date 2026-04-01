@@ -1,13 +1,9 @@
 """WebSocket sync handler — manages connections and routes messages."""
 
-import json
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
-from fastapi import WebSocket, WebSocketDisconnect
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from obsidian_sync.models.vault import VaultRole
+from fastapi import WebSocket
 
 logger = logging.getLogger(__name__)
 

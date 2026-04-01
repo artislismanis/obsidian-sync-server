@@ -42,3 +42,13 @@ def get_storage_backend(vault: object) -> StorageBackend:  # type: ignore[return
         )
 
     raise ValueError(f"Unsupported storage backend: {backend_type}")
+
+
+def get_local_vault_storage(vault_id: str) -> LocalStorage:
+    """Shortcut: get a LocalStorage instance for a vault by ID.
+
+    Used when the vault object isn't available (e.g., WebSocket handlers).
+    For production, prefer get_storage_backend(vault) which respects the vault's
+    configured storage type.
+    """
+    return LocalStorage(f"{settings.storage_local_path}/{vault_id}/current")

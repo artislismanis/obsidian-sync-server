@@ -69,12 +69,14 @@ class LocalStorage:
             raise FileNotFoundError(f"File not found: {path}")
         file_stat = full_path.stat()
 
-        # Compute hash for files
+        # Compute hash incrementally to avoid loading entire file into memory
         content_hash = None
         if full_path.is_file():
+            h = hashlib.sha256()
             async with aiofiles.open(full_path, "rb") as f:
-                data = await f.read()
-                content_hash = hashlib.sha256(data).hexdigest()
+                while chunk := await f.read(65536):
+                    h.update(chunk)
+            content_hash = h.hexdigest()
 
         return StorageStat(
             size=file_stat.st_size,

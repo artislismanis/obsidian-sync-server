@@ -8,17 +8,14 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from obsidian_sync.config import settings
 from obsidian_sync.services import sync as sync_service
+from obsidian_sync.services.storage_factory import get_local_vault_storage
 from obsidian_sync.services.yjs import yjs_manager
-from obsidian_sync.storage.local import LocalStorage
 from obsidian_sync.websocket.handler import ConnectedClient, manager
 
 logger = logging.getLogger(__name__)
 
 
-def _get_vault_storage(vault_id: str) -> LocalStorage:
-    return LocalStorage(f"{settings.storage_local_path}/{vault_id}/current")
 
 
 async def handle_message(
@@ -80,7 +77,7 @@ async def _handle_file_save(
         }
 
     # Store file
-    storage = _get_vault_storage(client.vault_id)
+    storage = get_local_vault_storage(client.vault_id)
     await storage.write(path, content, content_hash)
 
     # Create version record
@@ -125,7 +122,7 @@ async def _handle_file_delete(
         return {"type": "error", "code": "BAD_REQUEST", "message": "Missing path"}
 
     # Delete from storage
-    storage = _get_vault_storage(client.vault_id)
+    storage = get_local_vault_storage(client.vault_id)
     if await storage.exists(path):
         await storage.delete(path)
 
@@ -153,7 +150,7 @@ async def _handle_file_rename(
     if not old_path or not new_path:
         return {"type": "error", "code": "BAD_REQUEST", "message": "Missing old_path or new_path"}
 
-    storage = _get_vault_storage(client.vault_id)
+    storage = get_local_vault_storage(client.vault_id)
 
     # Move file in storage
     if await storage.exists(old_path):

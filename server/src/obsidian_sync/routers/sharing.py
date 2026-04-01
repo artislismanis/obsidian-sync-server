@@ -6,7 +6,6 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from obsidian_sync.config import settings
 from obsidian_sync.database import get_db
 from obsidian_sync.middleware.auth import get_current_user
 from obsidian_sync.models.user import User
@@ -26,15 +25,11 @@ from obsidian_sync.services import audit as audit_service
 from obsidian_sync.services import sharing as sharing_service
 from obsidian_sync.services import sync as sync_service
 from obsidian_sync.services import vault as vault_service
-from obsidian_sync.storage.local import LocalStorage
+from obsidian_sync.services.storage_factory import get_local_vault_storage
 
 router = APIRouter(tags=["sharing"])
 
 
-def _get_vault_storage(vault_id: str) -> LocalStorage:
-    """Get the storage backend for a vault."""
-    root = f"{settings.storage_local_path}/{vault_id}/current"
-    return LocalStorage(root)
 
 
 async def _require_vault_role(
@@ -317,7 +312,7 @@ async def access_share_link(
     # File-level share
     if link.file_path is not None:
         if link.permissions == "download":
-            storage = _get_vault_storage(vault_id)
+            storage = get_local_vault_storage(vault_id)
             try:
                 data = await storage.read(link.file_path)
                 content = base64.b64encode(data).decode("ascii")
