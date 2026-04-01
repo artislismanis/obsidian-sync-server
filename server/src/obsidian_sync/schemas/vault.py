@@ -8,6 +8,7 @@ class VaultCreateRequest(BaseModel):
     storage_backend: str = "local"
     encrypted: bool = False
     encryption_salt: str | None = None
+    encryption_key_hash: str | None = None
     sync_mode: str = "on_save"
     obsidian_config_sync: str = "settings_only"
 

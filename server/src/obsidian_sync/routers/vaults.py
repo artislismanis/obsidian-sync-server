@@ -69,6 +69,7 @@ async def create_vault(
         storage_backend=body.storage_backend,
         encrypted=body.encrypted,
         encryption_salt=body.encryption_salt,
+        encryption_key_hash=body.encryption_key_hash,
         sync_mode=body.sync_mode,
         obsidian_config_sync=body.obsidian_config_sync,
     )

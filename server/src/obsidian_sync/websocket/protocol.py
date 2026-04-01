@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from obsidian_sync.config import settings
 from obsidian_sync.services import sync as sync_service
+from obsidian_sync.services.yjs import yjs_manager
 from obsidian_sync.storage.local import LocalStorage
 from obsidian_sync.websocket.handler import ConnectedClient, manager
 
@@ -32,6 +33,7 @@ async def handle_message(
         "file_rename": _handle_file_rename,
         "pull": _handle_pull,
         "ping": _handle_ping,
+        "yjs_update": _handle_yjs_update,
     }
 
     handler = handlers.get(msg_type)
@@ -207,3 +209,39 @@ async def _handle_ping(
     client: ConnectedClient, data: dict, db: AsyncSession
 ) -> dict:
     return {"type": "pong"}
+
+
+async def _handle_yjs_update(
+    client: ConnectedClient, data: dict, db: AsyncSession
+) -> dict:
+    """Handle a Yjs CRDT update — store and broadcast to other vault clients.
+
+    This is a placeholder. The actual CRDT merging will use pycrdt when integrated.
+    """
+    path = data.get("path", "")
+    update_b64 = data.get("update", "")
+
+    if not path or not update_b64:
+        return {"type": "error", "code": "BAD_REQUEST", "message": "Missing path or update"}
+
+    try:
+        update_bytes = base64.b64decode(update_b64)
+    except Exception:
+        return {"type": "error", "code": "BAD_REQUEST", "message": "Invalid base64 update"}
+
+    # Store the update
+    yjs_manager.store_update(client.vault_id, path, update_bytes)
+
+    # Broadcast to other clients in the same vault
+    await manager.broadcast_to_vault(
+        client.vault_id,
+        {
+            "type": "yjs_update",
+            "path": path,
+            "update": update_b64,
+            "author": client.username,
+        },
+        exclude_user_id=client.user_id,
+    )
+
+    return {"type": "yjs_update_ack", "path": path}
