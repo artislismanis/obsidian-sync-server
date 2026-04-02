@@ -65,16 +65,16 @@ async def _handle_file_save(
     if not content_hash:
         content_hash = hashlib.sha256(content).hexdigest()
 
-    # Check for conflicts
-    if client_version > 0 and await sync_service.detect_conflict(db, client.vault_id, path, client_version):
-        return {
-            "type": "conflict",
-            "path": path,
-            "server_version": (await sync_service.get_file_version(db, client.vault_id, path)).version
-            if await sync_service.get_file_version(db, client.vault_id, path)
-            else 0,
-            "your_version": client_version,
-        }
+    # Check for conflicts — single DB call, store result
+    if client_version > 0:
+        server_fv = await sync_service.get_file_version(db, client.vault_id, path)
+        if server_fv and server_fv.version > client_version:
+            return {
+                "type": "conflict",
+                "path": path,
+                "server_version": server_fv.version,
+                "your_version": client_version,
+            }
 
     # Store file
     storage = get_local_vault_storage(client.vault_id)
@@ -121,10 +121,12 @@ async def _handle_file_delete(
     if not path:
         return {"type": "error", "code": "BAD_REQUEST", "message": "Missing path"}
 
-    # Delete from storage
+    # Delete from storage — operate directly, no existence check (TOCTOU)
     storage = get_local_vault_storage(client.vault_id)
-    if await storage.exists(path):
+    try:
         await storage.delete(path)
+    except FileNotFoundError:
+        pass
 
     # Record operation
     op = await sync_service.record_sync_operation(
@@ -152,11 +154,13 @@ async def _handle_file_rename(
 
     storage = get_local_vault_storage(client.vault_id)
 
-    # Move file in storage
-    if await storage.exists(old_path):
+    # Move file in storage — operate directly, no existence check (TOCTOU)
+    try:
         content = await storage.read(old_path)
         await storage.write(new_path, content)
         await storage.delete(old_path)
+    except FileNotFoundError:
+        pass
 
     # Record operation
     op = await sync_service.record_sync_operation(

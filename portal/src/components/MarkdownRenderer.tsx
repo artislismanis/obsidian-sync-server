@@ -36,10 +36,13 @@ function simpleMarkdownToHtml(md: string): string {
   html = html.replace(/```(\w*)\n([\s\S]*?)```/g, "<pre><code>$2</code></pre>");
   html = html.replace(/`([^`]+)`/g, "<code>$1</code>");
 
-  // Links
+  // Links — sanitize URLs to prevent javascript: XSS
   html = html.replace(
     /\[([^\]]+)\]\(([^)]+)\)/g,
-    '<a href="$2" target="_blank" rel="noopener">$1</a>'
+    (_match: string, text: string, url: string) => {
+      const sanitized = sanitizeUrl(url);
+      return `<a href="${sanitized}" target="_blank" rel="noopener noreferrer">${text}</a>`;
+    }
   );
 
   // Lists
@@ -56,6 +59,24 @@ function simpleMarkdownToHtml(md: string): string {
   html = html.replace(/\n{2,}/g, "\n");
 
   return html;
+}
+
+const SAFE_URL_PROTOCOLS = new Set(["http:", "https:", "mailto:"]);
+
+function sanitizeUrl(url: string): string {
+  try {
+    // URL constructor normalizes the protocol
+    const parsed = new URL(url, "https://placeholder");
+    if (!SAFE_URL_PROTOCOLS.has(parsed.protocol)) {
+      return "";
+    }
+  } catch {
+    // Relative URLs are safe
+    if (url.includes(":") && !url.startsWith("/") && !url.startsWith(".")) {
+      return "";
+    }
+  }
+  return url;
 }
 
 function escapeHtml(str: string): string {

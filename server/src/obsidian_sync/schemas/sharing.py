@@ -30,7 +30,7 @@ class CreateShareLinkRequest(BaseModel):
     file_path: str | None = None
     permissions: str = Field(default="view", pattern=r"^(view|download)$")
     expires_in_hours: int | None = None  # hours until expiry
-    password: str | None = None
+    password: str | None = Field(default=None, min_length=8)
     max_access_count: int | None = None
 
 

@@ -23,7 +23,13 @@ async def sync_websocket(
     vault_id: str,
     token: str = Query(default=""),
 ) -> None:
-    """WebSocket endpoint for vault sync. Authenticate via ?token=JWT query param."""
+    """WebSocket endpoint for vault sync. Authenticate via ?token=JWT query param.
+
+    Security note: JWT in query string is visible in server access logs and browser
+    history. This is a known trade-off — WebSocket doesn't support custom headers
+    during the handshake. The short-lived access token (15min) limits exposure.
+    Consider using a single-use ticket exchange for production deployments.
+    """
     # Authenticate
     try:
         payload = decode_access_token(token)

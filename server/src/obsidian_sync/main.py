@@ -1,5 +1,6 @@
 """FastAPI application factory."""
 
+import logging
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
 
@@ -10,10 +11,17 @@ from obsidian_sync.config import settings
 from obsidian_sync.database import engine
 from obsidian_sync.models import Base
 
+logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Create database tables on startup (dev convenience). Use Alembic in production."""
+    if settings.secret_key == "change-me-in-production":
+        logger.warning(
+            "SECURITY WARNING: Using default secret_key. "
+            "Set OSS_SECRET_KEY to a random string (min 32 chars) in production."
+        )
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     yield

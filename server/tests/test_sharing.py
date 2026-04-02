@@ -326,7 +326,7 @@ async def test_password_protected_share_link(
 
     link_resp = await client.post(
         f"/api/v1/vaults/{vault_id}/share-links",
-        json={"permissions": "view", "password": "s3cret"},
+        json={"permissions": "view", "password": "s3cret!pass"},
         headers=_auth(admin_token),
     )
     raw_token = link_resp.json()["token"]
@@ -343,7 +343,7 @@ async def test_password_protected_share_link(
 
     # Access with correct password => 200
     resp = await client.get(
-        f"/api/v1/share/{raw_token}", params={"password": "s3cret"}
+        f"/api/v1/share/{raw_token}", params={"password": "s3cret!pass"}
     )
     assert resp.status_code == 200
 
