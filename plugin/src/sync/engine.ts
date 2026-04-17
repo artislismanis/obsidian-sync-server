@@ -28,6 +28,7 @@ export class SyncEngine {
   private syncing = false;
   private debouncedSync: ReturnType<typeof debounce>;
   private processing = false;
+  private _syncLog: string[] = [];
 
   constructor(config: SyncEngineConfig) {
     this.config = config;
@@ -51,7 +52,11 @@ export class SyncEngine {
       for (const f of serverFiles.files) {
         this.versions[f.path] = f.version;
       }
+      const count = serverFiles.files.length;
+      this.log(`Connected — ${count} file${count !== 1 ? "s" : ""} tracked on server`);
+      new Notice(`Sync: Connected (${count} files on server)`);
     } catch {
+      this.log("Failed to connect to server");
       new Notice("Sync: Failed to connect to server");
     }
 
@@ -182,7 +187,6 @@ export class SyncEngine {
         const version = this.versions[change.path] || 0;
 
         if (client.isConnected) {
-          // Use WebSocket for connected sync
           const b64 = arrayBufferToBase64(content);
           const hash = await sha256Hex(content);
           client.sendMessage({
@@ -192,6 +196,7 @@ export class SyncEngine {
             version,
             content_hash: hash,
           });
+          this.log(`↑ ${change.path} (v${version + 1})`);
         } else {
           // Fall back to REST
           const result = await client.uploadFile(
@@ -201,6 +206,7 @@ export class SyncEngine {
             version
           );
           this.versions[change.path] = result.version;
+          this.log(`↑ ${change.path} (v${result.version}) via REST`);
         }
         break;
       }
@@ -255,8 +261,10 @@ export class SyncEngine {
 
     if (existing instanceof TFile) {
       await this.config.vault.modifyBinary(existing, content);
+      this.log(`↓ ${path} updated (v${version})`);
     } else {
       await this.config.vault.createBinary(path, content);
+      this.log(`↓ ${path} created (v${version})`);
     }
   }
 
@@ -324,14 +332,27 @@ export class SyncEngine {
   // --- Helpers ---
 
   private shouldSkipFile(file: TFile): boolean {
-    // Skip hidden files and conflict files
     if (file.path.startsWith(".")) return true;
     if (file.path.includes(".conflict-")) return true;
     return false;
   }
 
+  private log(msg: string): void {
+    const ts = new Date().toLocaleTimeString();
+    this._syncLog.push(`[${ts}] ${msg}`);
+    if (this._syncLog.length > 100) this._syncLog.shift();
+  }
+
   get pendingChanges(): number {
     return this.queue.length;
+  }
+
+  get trackedFileCount(): number {
+    return Object.keys(this.versions).length;
+  }
+
+  get syncLog(): string[] {
+    return [...this._syncLog];
   }
 }
 

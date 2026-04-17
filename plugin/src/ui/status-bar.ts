@@ -5,6 +5,7 @@ import { SyncClient } from "../sync/client";
 export class SyncStatusBar {
   private el: HTMLElement;
   private intervalId: ReturnType<typeof setInterval> | null = null;
+  private lastText = "";
 
   constructor(plugin: Plugin) {
     this.el = plugin.addStatusBarItem();
@@ -16,6 +17,7 @@ export class SyncStatusBar {
     this.intervalId = setInterval(() => {
       this.update(engine, client);
     }, 2000);
+    this.update(engine, client);
   }
 
   stopMonitoring(): void {
@@ -23,8 +25,7 @@ export class SyncStatusBar {
       clearInterval(this.intervalId);
       this.intervalId = null;
     }
-    this.el.setText("Sync: Idle");
-    this.el.style.color = "";
+    this.setText("Sync: Idle", "");
   }
 
   destroy(): void {
@@ -32,17 +33,31 @@ export class SyncStatusBar {
     this.el.remove();
   }
 
+  private setText(text: string, color: string): void {
+    if (text === this.lastText) return;
+    this.lastText = text;
+    this.el.setText(text);
+    this.el.style.color = color;
+  }
+
   private update(engine: SyncEngine, client: SyncClient): void {
     const pending = engine.pendingChanges;
+    const tracked = engine.trackedFileCount;
     if (!client.isConnected) {
-      this.el.setText(`Sync: Offline (${pending} pending)`);
-      this.el.style.color = "var(--text-error)";
+      this.setText(
+        `Sync: Offline (${pending} pending)`,
+        "var(--text-error)"
+      );
     } else if (pending > 0) {
-      this.el.setText(`Sync: ${pending} pending`);
-      this.el.style.color = "var(--text-warning)";
+      this.setText(
+        `Sync: Uploading ${pending} file${pending > 1 ? "s" : ""}...`,
+        "var(--text-warning)"
+      );
     } else {
-      this.el.setText("Sync: Connected");
-      this.el.style.color = "var(--text-success)";
+      this.setText(
+        `Sync: ${tracked} file${tracked !== 1 ? "s" : ""} synced`,
+        "var(--text-success)"
+      );
     }
   }
 }
