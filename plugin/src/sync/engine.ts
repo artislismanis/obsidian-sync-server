@@ -41,20 +41,11 @@ export class SyncEngine {
   }
 
   /**
-   * Start the sync engine: do initial sync, set up file watchers, connect WebSocket.
+   * Start the sync engine: do full bidirectional sync, then set up watchers.
    */
   async start(): Promise<void> {
-    // Initial pull — get current server state
     try {
-      const serverFiles = await this.config.client.listFiles(
-        this.config.vaultId
-      );
-      for (const f of serverFiles.files) {
-        this.versions[f.path] = f.version;
-      }
-      const count = serverFiles.files.length;
-      this.log(`Connected — ${count} file${count !== 1 ? "s" : ""} tracked on server`);
-      new Notice(`Sync: Connected (${count} files on server)`);
+      await this.initialSync();
     } catch {
       this.log("Failed to connect to server");
       new Notice("Sync: Failed to connect to server");
@@ -74,6 +65,88 @@ export class SyncEngine {
     this.config.client.onMessage("conflict", (data) =>
       this.handleConflict(data)
     );
+  }
+
+  /**
+   * Full bidirectional sync: compare local files against server,
+   * pull new/changed server files, push new/changed local files.
+   */
+  private async initialSync(): Promise<void> {
+    const serverData = await this.config.client.listFiles(
+      this.config.vaultId
+    );
+    const serverFiles = new Map<string, { version: number; content_hash: string }>();
+    for (const f of serverData.files) {
+      serverFiles.set(f.path, { version: f.version, content_hash: f.content_hash });
+      this.versions[f.path] = f.version;
+    }
+
+    // Get all local files
+    const localFiles = this.config.vault.getFiles();
+    const localPaths = new Set<string>();
+    let pulled = 0;
+    let pushed = 0;
+
+    // Pull files that exist on server but not locally, or are newer
+    for (const [path, info] of serverFiles) {
+      const localFile = this.config.vault.getAbstractFileByPath(path);
+      if (!(localFile instanceof TFile)) {
+        // File exists on server but not locally — pull it
+        try {
+          const { content } = await this.config.client.downloadFile(
+            this.config.vaultId, path
+          );
+          await this.config.vault.createBinary(path, content);
+          this.log(`↓ ${path} (v${info.version}) — new from server`);
+          pulled++;
+        } catch {
+          this.log(`✗ Failed to pull ${path}`);
+        }
+      }
+    }
+
+    // Push local files that don't exist on server or have changed
+    for (const file of localFiles) {
+      if (this.shouldSkipFile(file)) continue;
+      localPaths.add(file.path);
+
+      const serverInfo = serverFiles.get(file.path);
+
+      if (!serverInfo) {
+        // File exists locally but not on server — push it
+        this.queue.enqueue({
+          type: "create",
+          path: file.path,
+          timestamp: Date.now(),
+        });
+        pushed++;
+      } else {
+        // File exists on both — check if local is different by hash
+        try {
+          const content = await this.config.vault.readBinary(file);
+          const localHash = await sha256Hex(content);
+          if (localHash !== serverInfo.content_hash) {
+            this.queue.enqueue({
+              type: "update",
+              path: file.path,
+              timestamp: Date.now(),
+            });
+            pushed++;
+          }
+        } catch {
+          // skip unreadable files
+        }
+      }
+    }
+
+    // Process the push queue
+    if (!this.queue.isEmpty()) {
+      await this.processQueue();
+    }
+
+    const total = serverFiles.size + pushed;
+    this.log(`Initial sync: ${pulled} pulled, ${pushed} pushed, ${serverFiles.size} on server`);
+    new Notice(`Sync: ${pulled} pulled, ${pushed} pushed (${serverFiles.size} on server)`);
   }
 
   stop(): void {
