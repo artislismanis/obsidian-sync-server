@@ -71,25 +71,34 @@ def create_app() -> FastAPI:
     app.add_middleware(RateLimitMiddleware)
 
     # Serve portal static files (built React SPA)
-    import os
     from pathlib import Path
-    static_dir = Path(os.environ.get("OSS_STATIC_DIR", "/app/static"))
+    static_dir = Path(settings.storage_local_path).parent.parent / "static"
+    env_static = settings.model_config.get("env_prefix", "OSS_")
+    import os
+    static_override = os.environ.get("OSS_STATIC_DIR")
+    if static_override:
+        static_dir = Path(static_override)
+
     if static_dir.is_dir():
         from starlette.staticfiles import StaticFiles
         from starlette.responses import FileResponse
 
-        @app.get("/")
-        async def serve_index():
-            return FileResponse(static_dir / "index.html")
+        index_html = static_dir / "index.html"
+        assets_dir = static_dir / "assets"
 
-        app.mount("/assets", StaticFiles(directory=static_dir / "assets"), name="portal-assets")
+        @app.get("/")
+        async def serve_index() -> FileResponse:
+            return FileResponse(index_html)
+
+        if assets_dir.is_dir():
+            app.mount("/assets", StaticFiles(directory=assets_dir), name="portal-assets")
 
         @app.get("/{path:path}")
-        async def serve_spa(path: str):
-            file = static_dir / path
-            if file.is_file():
-                return FileResponse(file)
-            return FileResponse(static_dir / "index.html")
+        async def serve_spa(path: str) -> FileResponse:
+            resolved = (static_dir / path).resolve()
+            if resolved.is_file() and str(resolved).startswith(str(static_dir.resolve())):
+                return FileResponse(resolved)
+            return FileResponse(index_html)
 
     return app
 

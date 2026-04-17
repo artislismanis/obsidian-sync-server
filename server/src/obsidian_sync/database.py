@@ -1,6 +1,5 @@
 """SQLAlchemy async engine and session factory."""
 
-import os
 from collections.abc import AsyncGenerator
 from pathlib import Path
 
