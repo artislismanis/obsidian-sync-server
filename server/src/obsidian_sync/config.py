@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     deployment_mode: str = "self_hosted"  # "self_hosted" or "saas"
 
     # Database
-    database_url: str = "sqlite+aiosqlite:///data/obsidian-sync.db"
+    database_url: str = "sqlite+aiosqlite:///./data/obsidian-sync.db"
 
     # Storage
     storage_backend: str = "local"  # "local" or "s3"

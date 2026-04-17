@@ -1,6 +1,8 @@
 """SQLAlchemy async engine and session factory."""
 
+import os
 from collections.abc import AsyncGenerator
+from pathlib import Path
 
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
@@ -10,10 +12,15 @@ from sqlalchemy.ext.asyncio import (
 
 from obsidian_sync.config import settings
 
+# Ensure SQLite directory exists before engine creation
+if settings.database_url.startswith("sqlite"):
+    db_path = settings.database_url.split("///")[-1]
+    if db_path:
+        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+
 engine = create_async_engine(
     settings.database_url,
     echo=settings.debug,
-    # SQLite needs special handling for async
     connect_args={"check_same_thread": False}
     if settings.database_url.startswith("sqlite")
     else {},
