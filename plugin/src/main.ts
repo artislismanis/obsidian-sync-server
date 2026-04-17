@@ -3,6 +3,7 @@ import { SyncSettingTab } from "./settings";
 import { SyncClient, SyncServerConfig } from "./sync/client";
 import { SyncEngine } from "./sync/engine";
 import { SyncStatusBar } from "./ui/status-bar";
+import { SyncLogModal } from "./ui/sync-log-modal";
 
 interface SyncPluginSettings {
   serverUrl: string;
@@ -31,6 +32,25 @@ export default class ObsidianSyncPlugin extends Plugin {
 
     this.addSettingTab(new SyncSettingTab(this.app, this));
     this.statusBar = new SyncStatusBar(this);
+
+    this.addCommand({
+      id: "show-sync-log",
+      name: "Show sync log",
+      callback: () => {
+        const logs = this.engine?.syncLog ?? [];
+        new SyncLogModal(this.app, logs).open();
+      },
+    });
+
+    this.addCommand({
+      id: "force-sync",
+      name: "Force sync now",
+      callback: async () => {
+        if (this.engine) {
+          await this.startSync();
+        }
+      },
+    });
 
     if (this.settings.serverUrl && this.settings.accessToken) {
       await this.startSync();
