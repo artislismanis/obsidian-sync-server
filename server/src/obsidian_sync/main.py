@@ -70,6 +70,27 @@ def create_app() -> FastAPI:
 
     app.add_middleware(RateLimitMiddleware)
 
+    # Serve portal static files (built React SPA)
+    import os
+    from pathlib import Path
+    static_dir = Path(os.environ.get("OSS_STATIC_DIR", "/app/static"))
+    if static_dir.is_dir():
+        from starlette.staticfiles import StaticFiles
+        from starlette.responses import FileResponse
+
+        @app.get("/")
+        async def serve_index():
+            return FileResponse(static_dir / "index.html")
+
+        app.mount("/assets", StaticFiles(directory=static_dir / "assets"), name="portal-assets")
+
+        @app.get("/{path:path}")
+        async def serve_spa(path: str):
+            file = static_dir / path
+            if file.is_file():
+                return FileResponse(file)
+            return FileResponse(static_dir / "index.html")
+
     return app
 
 
