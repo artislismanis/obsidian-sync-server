@@ -30,8 +30,8 @@ export default class ObsidianSyncPlugin extends Plugin {
     await this.loadSettings();
 
     this.addSettingTab(new SyncSettingTab(this.app, this));
+    this.statusBar = new SyncStatusBar(this);
 
-    // Initialize if configured
     if (this.settings.serverUrl && this.settings.accessToken) {
       await this.startSync();
     }
@@ -39,6 +39,8 @@ export default class ObsidianSyncPlugin extends Plugin {
 
   async onunload(): Promise<void> {
     this.stopSync();
+    this.statusBar?.destroy();
+    this.statusBar = null;
   }
 
   async startSync(): Promise<void> {
@@ -60,11 +62,8 @@ export default class ObsidianSyncPlugin extends Plugin {
       vault: this.app.vault,
     });
 
-    // Status bar
-    this.statusBar = new SyncStatusBar(this);
-    this.statusBar.startMonitoring(this.engine, this.client);
+    this.statusBar?.startMonitoring(this.engine, this.client);
 
-    // Start engine
     await this.engine.start();
 
     // Register file event handlers
@@ -89,8 +88,7 @@ export default class ObsidianSyncPlugin extends Plugin {
   stopSync(): void {
     this.engine?.stop();
     this.engine = null;
-    this.statusBar?.stop();
-    this.statusBar = null;
+    this.statusBar?.stopMonitoring();
     this.client = null;
   }
 

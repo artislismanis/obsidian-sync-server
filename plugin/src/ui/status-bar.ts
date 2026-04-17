@@ -12,16 +12,24 @@ export class SyncStatusBar {
   }
 
   startMonitoring(engine: SyncEngine, client: SyncClient): void {
+    this.stopMonitoring();
     this.intervalId = setInterval(() => {
       this.update(engine, client);
     }, 2000);
   }
 
-  stop(): void {
+  stopMonitoring(): void {
     if (this.intervalId) {
       clearInterval(this.intervalId);
       this.intervalId = null;
     }
+    this.el.setText("Sync: Idle");
+    this.el.style.color = "";
+  }
+
+  destroy(): void {
+    this.stopMonitoring();
+    this.el.remove();
   }
 
   private update(engine: SyncEngine, client: SyncClient): void {
