@@ -6,6 +6,7 @@ from obsidian_sync.models.vault import Vault, VaultAccess
 from obsidian_sync.models.sync import FileVersion, SyncOperation
 from obsidian_sync.models.sharing import ShareLink
 from obsidian_sync.models.audit import AuditLog
+from obsidian_sync.models.external import ExternalSyncConfig
 
 __all__ = [
     "Base",
@@ -18,4 +19,5 @@ __all__ = [
     "SyncOperation",
     "ShareLink",
     "AuditLog",
+    "ExternalSyncConfig",
 ]

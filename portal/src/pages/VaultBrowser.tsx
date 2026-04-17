@@ -5,9 +5,10 @@ import { MarkdownRenderer } from "../components/MarkdownRenderer";
 interface VaultBrowserProps {
   vaultId: string;
   onBack: () => void;
+  onViewHistory?: (filePath: string) => void;
 }
 
-export function VaultBrowser({ vaultId, onBack }: VaultBrowserProps) {
+export function VaultBrowser({ vaultId, onBack, onViewHistory }: VaultBrowserProps) {
   const [files, setFiles] = useState<FileInfo[]>([]);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [fileContent, setFileContent] = useState("");
@@ -50,7 +51,17 @@ export function VaultBrowser({ vaultId, onBack }: VaultBrowserProps) {
         <div className="file-content">
           {selectedFile ? (
             <>
-              <h3>{selectedFile}</h3>
+              <div className="file-content-header">
+                <h3>{selectedFile}</h3>
+                {onViewHistory && (
+                  <button
+                    className="history-btn"
+                    onClick={() => onViewHistory(selectedFile)}
+                  >
+                    History
+                  </button>
+                )}
+              </div>
               {selectedFile.endsWith(".md") ? (
                 <MarkdownRenderer content={fileContent} />
               ) : (

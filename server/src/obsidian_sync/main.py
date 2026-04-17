@@ -41,13 +41,29 @@ def create_app() -> FastAPI:
     # Register routers
     from obsidian_sync.routers.health import router as health_router
     from obsidian_sync.routers.auth import router as auth_router
+    from obsidian_sync.routers.oauth import router as oauth_router
+    from obsidian_sync.routers.users import router as users_router
     from obsidian_sync.routers.vaults import router as vaults_router
     from obsidian_sync.routers.sharing import router as sharing_router
+    from obsidian_sync.routers.history import router as history_router
+    from obsidian_sync.routers.admin import router as admin_router
+    from obsidian_sync.routers.billing import router as billing_router
+    from obsidian_sync.routers.gdpr import router as gdpr_router
+    from obsidian_sync.routers.sync_ws import router as sync_ws_router
+    from obsidian_sync.routers.external_sync import router as external_sync_router
 
     app.include_router(health_router)
     app.include_router(auth_router)
+    app.include_router(oauth_router)
+    app.include_router(users_router)
     app.include_router(vaults_router)
     app.include_router(sharing_router)
+    app.include_router(history_router)
+    app.include_router(admin_router)
+    app.include_router(billing_router)
+    app.include_router(gdpr_router)
+    app.include_router(sync_ws_router)
+    app.include_router(external_sync_router)
 
     # Rate limiting middleware (sliding window, in-memory for self-hosted mode)
     from obsidian_sync.middleware.rate_limit import RateLimitMiddleware

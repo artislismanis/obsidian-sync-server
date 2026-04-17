@@ -59,12 +59,6 @@ async def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found"
         )
 
-    if user.deletion_requested_at is not None:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Account pending deletion",
-        )
-
     return user
 
 

@@ -11,9 +11,23 @@ from rich.progress import Progress
 
 from obsidian_sync_cli.client.http import SyncHTTPClient
 from obsidian_sync_cli.config import CLIConfig, VaultMapping
+from obsidian_sync_cli.sync.crypto import decrypt as crypto_decrypt
+from obsidian_sync_cli.sync.crypto import derive_key, encrypt as crypto_encrypt
 
 console = Console()
 app = typer.Typer()
+
+
+def _get_passphrase() -> str:
+    """Read the vault passphrase from the environment or prompt the user."""
+    passphrase = os.environ.get("OSS_VAULT_PASSPHRASE", "")
+    if not passphrase:
+        passphrase = typer.prompt("Vault passphrase", hide_input=True)
+    return passphrase
+
+
+# Fixed salt used for key derivation (shared across clients).
+_DEFAULT_SALT = "0" * 64
 
 
 def _hash_file(path: Path) -> str:
@@ -36,6 +50,7 @@ def _local_files(directory: Path) -> dict[str, str]:
 @app.command()
 def pull(
     vault: str = typer.Option("", "--vault", "-v", help="Vault name or ID"),
+    encrypted: bool = typer.Option(False, "--encrypted", "-e", help="Decrypt files after download"),
 ) -> None:
     """Pull latest files from server."""
     config = CLIConfig.load()
@@ -44,10 +59,20 @@ def pull(
         console.print("[red]No vault configured. Run 'oss sync' first.[/red]")
         raise typer.Exit(1)
 
-    asyncio.run(_pull(config, mapping))
+    key: bytes | None = None
+    if encrypted:
+        passphrase = _get_passphrase()
+        key = derive_key(passphrase, _DEFAULT_SALT)
+
+    asyncio.run(_pull(config, mapping, key=key))
 
 
-async def _pull(config: CLIConfig, mapping: VaultMapping) -> None:
+async def _pull(
+    config: CLIConfig,
+    mapping: VaultMapping,
+    *,
+    key: bytes | None = None,
+) -> None:
     client = SyncHTTPClient(config)
     try:
         data = await client.list_files(mapping.vault_id)
@@ -69,6 +94,8 @@ async def _pull(config: CLIConfig, mapping: VaultMapping) -> None:
                         continue
 
                 content, version = await client.download_file(mapping.vault_id, path)
+                if key is not None:
+                    content = crypto_decrypt(key, content)
                 local_path.parent.mkdir(parents=True, exist_ok=True)
                 local_path.write_bytes(content)
                 progress.advance(task)
@@ -81,6 +108,7 @@ async def _pull(config: CLIConfig, mapping: VaultMapping) -> None:
 @app.command()
 def push(
     vault: str = typer.Option("", "--vault", "-v", help="Vault name or ID"),
+    encrypted: bool = typer.Option(False, "--encrypted", "-e", help="Encrypt files before upload"),
 ) -> None:
     """Push local changes to server."""
     config = CLIConfig.load()
@@ -89,10 +117,20 @@ def push(
         console.print("[red]No vault configured. Run 'oss sync' first.[/red]")
         raise typer.Exit(1)
 
-    asyncio.run(_push(config, mapping))
+    key: bytes | None = None
+    if encrypted:
+        passphrase = _get_passphrase()
+        key = derive_key(passphrase, _DEFAULT_SALT)
+
+    asyncio.run(_push(config, mapping, key=key))
 
 
-async def _push(config: CLIConfig, mapping: VaultMapping) -> None:
+async def _push(
+    config: CLIConfig,
+    mapping: VaultMapping,
+    *,
+    key: bytes | None = None,
+) -> None:
     client = SyncHTTPClient(config)
     try:
         local_dir = Path(mapping.local_dir)
@@ -112,6 +150,8 @@ async def _push(config: CLIConfig, mapping: VaultMapping) -> None:
                     continue
 
                 content = (local_dir / rel_path).read_bytes()
+                if key is not None:
+                    content = crypto_encrypt(key, content)
                 version = sf["version"] if sf else 0
                 await client.upload_file(mapping.vault_id, rel_path, content, version)
                 uploaded += 1
@@ -126,6 +166,7 @@ async def _push(config: CLIConfig, mapping: VaultMapping) -> None:
 def sync_cmd(
     local_dir: str = typer.Argument(help="Local directory to sync"),
     vault: str = typer.Option("", "--vault", "-v", help="Vault name or ID"),
+    encrypted: bool = typer.Option(False, "--encrypted", "-e", help="Encrypt/decrypt files during sync"),
 ) -> None:
     """Bidirectional sync between local directory and server vault."""
     config = CLIConfig.load()
@@ -134,14 +175,19 @@ def sync_cmd(
         console.print("[red]Specify --vault[/red]")
         raise typer.Exit(1)
 
+    key: bytes | None = None
+    if encrypted:
+        passphrase = _get_passphrase()
+        key = derive_key(passphrase, _DEFAULT_SALT)
+
     # Store mapping
     mapping = VaultMapping(vault_id=vault, local_dir=str(Path(local_dir).resolve()))
     config.vaults[vault] = mapping
     config.save()
 
     # Pull then push
-    asyncio.run(_pull(config, mapping))
-    asyncio.run(_push(config, mapping))
+    asyncio.run(_pull(config, mapping, key=key))
+    asyncio.run(_push(config, mapping, key=key))
     console.print("[green]Sync complete[/green]")
 
 

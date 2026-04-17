@@ -135,6 +135,45 @@ class APIClient {
   async getHealth(): Promise<{ status: string; version: string; mode: string }> {
     return this.request("/api/v1/health");
   }
+
+  async getFileHistory(
+    vaultId: string,
+    path: string
+  ): Promise<{ versions: FileVersionInfo[] }> {
+    return this.request(
+      `/api/v1/vaults/${vaultId}/files/${encodeURIComponent(path)}/history`
+    );
+  }
+
+  async restoreFileVersion(
+    vaultId: string,
+    path: string,
+    version: number
+  ): Promise<void> {
+    await this.request(
+      `/api/v1/vaults/${vaultId}/files/${encodeURIComponent(path)}/restore`,
+      { method: "POST", body: { version } }
+    );
+  }
+
+  async getShareLink(token: string, password?: string): Promise<ShareData> {
+    const query = password
+      ? `?password=${encodeURIComponent(password)}`
+      : "";
+    return this.request(`/api/v1/share/${token}${query}`);
+  }
+
+  async getSubscription(): Promise<SubscriptionInfo> {
+    return this.request("/api/v1/billing/subscription");
+  }
+
+  async createCheckout(): Promise<{ checkout_url: string }> {
+    return this.request("/api/v1/billing/checkout", { method: "POST" });
+  }
+
+  async createPortalSession(): Promise<{ portal_url: string }> {
+    return this.request("/api/v1/billing/portal", { method: "POST" });
+  }
 }
 
 export interface VaultInfo {
@@ -156,6 +195,35 @@ export interface FileInfo {
   size_bytes: number;
   author_id: string;
   created_at: string;
+}
+
+export interface FileVersionInfo {
+  version: number;
+  author_id: string;
+  created_at: string;
+  size_bytes: number;
+  content_hash: string;
+}
+
+export interface ShareData {
+  file_path: string;
+  content: string;
+  shared_by: string;
+  created_at: string;
+}
+
+export interface SubscriptionInfo {
+  tier: string;
+  status: string;
+  current_period_end: string | null;
+  entitlements: {
+    vault_count: number;
+    max_vaults: number;
+    storage_used: number;
+    max_storage_bytes: number;
+    max_collaborators: number;
+    version_history_days: number;
+  };
 }
 
 export const api = new APIClient();
