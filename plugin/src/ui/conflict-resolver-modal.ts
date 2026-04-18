@@ -1,4 +1,5 @@
 import { App, Modal, TFile, Vault, Notice, Setting } from "obsidian";
+import { MergeModal } from "./merge-view";
 
 export class ConflictResolverModal extends Modal {
   private vault: Vault;
@@ -85,6 +86,11 @@ export class ConflictResolverModal extends Modal {
       this.resolve(conflict, "local")
     );
 
+    const mergeBtn = actions.createEl("button", { text: "Merge versions", cls: "mod-cta" });
+    mergeBtn.addEventListener("click", () =>
+      this.openMerge(conflict)
+    );
+
     const keepBothBtn = actions.createEl("button", { text: "Keep both" });
     keepBothBtn.addEventListener("click", () =>
       this.resolve(conflict, "both")
@@ -142,6 +148,35 @@ export class ConflictResolverModal extends Modal {
     rightPre.style.fontSize = "12px";
     rightPre.style.whiteSpace = "pre-wrap";
     rightPre.setText(localContent);
+  }
+
+  private async openMerge(conflict: { original: TFile; conflict: TFile }): Promise<void> {
+    let serverContent = "";
+    let localContent = "";
+    try {
+      serverContent = await this.vault.read(conflict.original);
+      localContent = await this.vault.read(conflict.conflict);
+    } catch {
+      new Notice("Unable to read file contents for merge");
+      return;
+    }
+
+    const modal = new MergeModal(this.app, serverContent, localContent);
+    const result = await modal.waitForResult();
+
+    if (result.merged) {
+      await this.vault.modify(conflict.original, result.content);
+      await this.vault.delete(conflict.conflict);
+      new Notice(`Merged: ${conflict.original.path}`);
+      this.conflicts.splice(this.currentIndex, 1);
+      if (this.conflicts.length === 0) {
+        new Notice("All conflicts resolved!");
+        this.close();
+      } else {
+        if (this.currentIndex >= this.conflicts.length) this.currentIndex = 0;
+        this.render();
+      }
+    }
   }
 
   private async resolve(

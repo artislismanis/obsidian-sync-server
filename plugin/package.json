@@ -10,6 +10,7 @@
     "format": "prettier --write src/"
   },
   "devDependencies": {
+    "@types/diff": "^7.0.2",
     "@types/node": "^20.11.0",
     "@typescript-eslint/eslint-plugin": "^7.0.0",
     "@typescript-eslint/parser": "^7.0.0",
@@ -19,5 +20,8 @@
     "obsidian": "latest",
     "prettier": "^3.2.0",
     "typescript": "^5.3.0"
+  },
+  "dependencies": {
+    "diff": "^9.0.0"
   }
 }
