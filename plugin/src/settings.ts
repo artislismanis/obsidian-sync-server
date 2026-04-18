@@ -124,6 +124,26 @@ export class SyncSettingTab extends PluginSettingTab {
       this.loadVaultList(vaultListEl);
     }
 
+    // --- Device ---
+    containerEl.createEl("h3", { text: "Device" });
+
+    new Setting(containerEl)
+      .setName("Device name")
+      .setDesc("Identifies this device in sync logs and connected devices list")
+      .addText((text) =>
+        text
+          .setValue(this.plugin.settings.deviceName)
+          .onChange(async (value) => {
+            this.plugin.settings.deviceName = value;
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName("Device ID")
+      .setDesc(this.plugin.settings.deviceId)
+      .setDisabled(true);
+
     // --- Sync Settings ---
     containerEl.createEl("h3", { text: "Sync" });
 

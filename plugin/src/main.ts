@@ -1,4 +1,4 @@
-import { Plugin } from "obsidian";
+import { Platform, Plugin } from "obsidian";
 import { SyncSettingTab } from "./settings";
 import { SyncClient, SyncServerConfig } from "./sync/client";
 import { SyncEngine } from "./sync/engine";
@@ -15,6 +15,23 @@ interface SyncPluginSettings {
   autoSync: boolean;
   conflictStrategy: string;
   syncedVaults: string[];
+  deviceId: string;
+  deviceName: string;
+}
+
+function generateDeviceId(): string {
+  const arr = new Uint8Array(16);
+  crypto.getRandomValues(arr);
+  return Array.from(arr, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function defaultDeviceName(): string {
+  if (Platform.isIosApp) return "iPhone/iPad";
+  if (Platform.isAndroidApp) return "Android";
+  if (Platform.isMacOS) return "Mac";
+  if (Platform.isWin) return "Windows PC";
+  if (Platform.isLinux) return "Linux";
+  return "Desktop";
 }
 
 const DEFAULT_SETTINGS: SyncPluginSettings = {
@@ -25,6 +42,8 @@ const DEFAULT_SETTINGS: SyncPluginSettings = {
   autoSync: true,
   conflictStrategy: "keep-both",
   syncedVaults: [],
+  deviceId: "",
+  deviceName: "",
 };
 
 export default class ObsidianSyncPlugin extends Plugin {
@@ -35,6 +54,12 @@ export default class ObsidianSyncPlugin extends Plugin {
 
   async onload(): Promise<void> {
     await this.loadSettings();
+
+    if (!this.settings.deviceId) {
+      this.settings.deviceId = generateDeviceId();
+      this.settings.deviceName = defaultDeviceName();
+      await this.saveSettings();
+    }
 
     this.addSettingTab(new SyncSettingTab(this.app, this));
     this.statusBar = new SyncStatusBar(this);
@@ -84,6 +109,8 @@ export default class ObsidianSyncPlugin extends Plugin {
       serverUrl: this.settings.serverUrl,
       accessToken: this.settings.accessToken,
       refreshToken: this.settings.refreshToken,
+      deviceId: this.settings.deviceId,
+      deviceName: this.settings.deviceName,
     };
 
     this.client = new SyncClient(config);

@@ -6,6 +6,8 @@ export interface SyncServerConfig {
   serverUrl: string;
   accessToken: string;
   refreshToken: string;
+  deviceId?: string;
+  deviceName?: string;
 }
 
 export interface TokenResponse {
@@ -197,9 +199,14 @@ export class SyncClient {
   }
 
   private _connectWS(vaultId: string): void {
+    const params = new URLSearchParams({
+      token: this.config.accessToken,
+      device_id: this.config.deviceId || "",
+      device_name: this.config.deviceName || "",
+    });
     const wsUrl = this.serverUrl
       .replace(/^http/, "ws")
-      .concat(`/api/v1/sync/${vaultId}?token=${this.config.accessToken}`);
+      .concat(`/api/v1/sync/${vaultId}?${params.toString()}`);
 
     this.ws = new WebSocket(wsUrl);
 
