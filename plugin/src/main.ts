@@ -12,6 +12,7 @@ interface SyncPluginSettings {
   accessToken: string;
   refreshToken: string;
   vaultId: string;
+  vaultName: string;
   autoSync: boolean;
   conflictStrategy: string;
   syncedVaults: string[];
@@ -39,6 +40,7 @@ const DEFAULT_SETTINGS: SyncPluginSettings = {
   accessToken: "",
   refreshToken: "",
   vaultId: "",
+  vaultName: "",
   autoSync: true,
   conflictStrategy: "keep-both",
   syncedVaults: [],

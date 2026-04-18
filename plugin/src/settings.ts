@@ -107,12 +107,16 @@ export class SyncSettingTab extends PluginSettingTab {
     containerEl.createEl("h3", { text: "Vault" });
 
     if (this.plugin.settings.vaultId) {
+      const vaultLabel = this.plugin.settings.vaultName
+        ? `${this.plugin.settings.vaultName}`
+        : this.plugin.settings.vaultId;
       new Setting(containerEl)
-        .setName("Connected vault")
+        .setName(vaultLabel)
         .setDesc(this.plugin.settings.vaultId)
         .addButton((btn) =>
           btn.setButtonText("Disconnect").onClick(async () => {
             this.plugin.settings.vaultId = "";
+            this.plugin.settings.vaultName = "";
             this.plugin.stopSync();
             await this.plugin.saveSettings();
             this.display();
@@ -201,7 +205,7 @@ export class SyncSettingTab extends PluginSettingTab {
                 .setButtonText("Connect")
                 .setCta()
                 .onClick(async () => {
-                  await this.connectToVault(vault.id);
+                  await this.connectToVault(vault.id, vault.name);
                 })
             );
         }
@@ -230,7 +234,7 @@ export class SyncSettingTab extends PluginSettingTab {
             try {
               const resp = await client.createVault(newVaultName.trim());
               new Notice(`Vault "${newVaultName}" created!`);
-              await this.connectToVault(resp.id);
+              await this.connectToVault(resp.id, newVaultName.trim());
             } catch (e) {
               new Notice(`Failed to create vault: ${e}`);
             }
@@ -245,8 +249,9 @@ export class SyncSettingTab extends PluginSettingTab {
     }
   }
 
-  private async connectToVault(vaultId: string): Promise<void> {
+  private async connectToVault(vaultId: string, vaultName?: string): Promise<void> {
     this.plugin.settings.vaultId = vaultId;
+    this.plugin.settings.vaultName = vaultName || "";
     await this.plugin.saveSettings();
     await this.plugin.startSync();
     this.display();
