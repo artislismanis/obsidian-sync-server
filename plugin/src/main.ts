@@ -14,7 +14,7 @@ interface SyncPluginSettings {
   vaultId: string;
   autoSync: boolean;
   conflictStrategy: string;
-  hasCompletedFirstSync: boolean;
+  syncedVaults: string[];
 }
 
 const DEFAULT_SETTINGS: SyncPluginSettings = {
@@ -24,7 +24,7 @@ const DEFAULT_SETTINGS: SyncPluginSettings = {
   vaultId: "",
   autoSync: true,
   conflictStrategy: "keep-both",
-  hasCompletedFirstSync: false,
+  syncedVaults: [],
 };
 
 export default class ObsidianSyncPlugin extends Plugin {
@@ -90,8 +90,9 @@ export default class ObsidianSyncPlugin extends Plugin {
 
     if (!this.settings.vaultId) return;
 
-    // First-sync confirmation: show modal if vault has local files and this is the first connection
-    if (!this.settings.hasCompletedFirstSync) {
+    // First-sync confirmation: show modal on first connection to this vault
+    const isFirstSync = !this.settings.syncedVaults.includes(this.settings.vaultId);
+    if (isFirstSync) {
       const localFiles = this.app.vault.getFiles().filter(
         (f) => !f.path.startsWith(".") && !f.path.includes(".conflict-")
       );
@@ -108,14 +109,11 @@ export default class ObsidianSyncPlugin extends Plugin {
         const modal = new FirstSyncModal(this.app, localFiles.length, serverFileCount);
         const result = await modal.waitForResult();
         if (!result.confirmed) return;
-
         this.settings.conflictStrategy = result.strategy;
-        this.settings.hasCompletedFirstSync = true;
-        await this.saveSettings();
-      } else {
-        this.settings.hasCompletedFirstSync = true;
-        await this.saveSettings();
       }
+
+      this.settings.syncedVaults = [...this.settings.syncedVaults, this.settings.vaultId];
+      await this.saveSettings();
     }
 
     this.engine = new SyncEngine({
