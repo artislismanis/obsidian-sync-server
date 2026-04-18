@@ -5,6 +5,7 @@ import { SyncEngine } from "./sync/engine";
 import { SyncStatusBar } from "./ui/status-bar";
 import { SyncLogModal } from "./ui/sync-log-modal";
 import { FirstSyncModal } from "./ui/first-sync-modal";
+import { ConflictResolverModal } from "./ui/conflict-resolver-modal";
 
 interface SyncPluginSettings {
   serverUrl: string;
@@ -54,6 +55,14 @@ export default class ObsidianSyncPlugin extends Plugin {
         if (this.engine) {
           await this.startSync();
         }
+      },
+    });
+
+    this.addCommand({
+      id: "resolve-conflicts",
+      name: "Resolve sync conflicts",
+      callback: () => {
+        new ConflictResolverModal(this.app, this.app.vault).open();
       },
     });
 
