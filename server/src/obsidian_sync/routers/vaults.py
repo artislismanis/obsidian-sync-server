@@ -3,10 +3,12 @@
 import base64
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from obsidian_sync.database import get_db
 from obsidian_sync.middleware.auth import get_current_user
+from obsidian_sync.models.sync import FileVersion
 from obsidian_sync.models.user import User
 from obsidian_sync.models.vault import VaultRole
 from obsidian_sync.schemas.sync import (
@@ -29,7 +31,30 @@ from obsidian_sync.services.storage_factory import get_local_vault_storage
 router = APIRouter(prefix="/api/v1/vaults", tags=["vaults"])
 
 
-def _vault_to_response(vault) -> VaultResponse:  # type: ignore[no-untyped-def]
+async def _get_storage_used_bytes(db: AsyncSession, vault_id: str) -> int:
+    """Sum size_bytes from the latest FileVersion for each file in the vault."""
+    max_version_subq = (
+        select(
+            FileVersion.file_path,
+            func.max(FileVersion.version).label("max_version"),
+        )
+        .where(FileVersion.vault_id == vault_id)
+        .group_by(FileVersion.file_path)
+        .subquery()
+    )
+    result = await db.execute(
+        select(func.coalesce(func.sum(FileVersion.size_bytes), 0))
+        .join(
+            max_version_subq,
+            (FileVersion.file_path == max_version_subq.c.file_path)
+            & (FileVersion.version == max_version_subq.c.max_version),
+        )
+        .where(FileVersion.vault_id == vault_id)
+    )
+    return result.scalar_one()
+
+
+def _vault_to_response(vault, storage_used_bytes: int = 0) -> VaultResponse:  # type: ignore[no-untyped-def]
     return VaultResponse(
         id=vault.id,
         name=vault.name,
@@ -40,6 +65,7 @@ def _vault_to_response(vault) -> VaultResponse:  # type: ignore[no-untyped-def]
         obsidian_config_sync=vault.obsidian_config_sync,
         created_at=vault.created_at.isoformat() if vault.created_at else "",
         updated_at=vault.updated_at.isoformat() if vault.updated_at else "",
+        storage_used_bytes=storage_used_bytes,
     )
 
 
@@ -89,7 +115,8 @@ async def get_vault(
     if role is None and not current_user.is_superadmin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
-    return _vault_to_response(vault)
+    storage_used = await _get_storage_used_bytes(db, vault_id)
+    return _vault_to_response(vault, storage_used_bytes=storage_used)
 
 
 @router.patch("/{vault_id}", response_model=VaultResponse)
@@ -286,8 +313,17 @@ async def delete_file(
     if file_version is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
 
-    # Remove from storage
+    # Copy content to version-addressed path before deleting
     storage = get_local_vault_storage(vault_id)
+    try:
+        data = await storage.read(path)
+        version_path = f".sync/versions/{file_version.content_hash}"
+        if not await storage.exists(version_path):
+            await storage.write(version_path, data)
+    except (FileNotFoundError, OSError):
+        pass  # File already missing from storage; proceed with delete record
+
+    # Remove from storage
     await storage.delete(path)
 
     # Record sync operation

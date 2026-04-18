@@ -70,7 +70,13 @@ export class SyncStatusBar {
     const tracked = this.engine.trackedFileCount;
     const s = this.engine.stats;
 
-    if (!this.client.isConnected) {
+    if (this.engine.isPaused) {
+      this.setState(
+        "⏸ Paused",
+        "var(--text-muted)",
+        `Sync: Paused\n${tracked} files tracked`
+      );
+    } else if (!this.client.isConnected) {
       this.setState(
         `⚡ ✗ ${pending > 0 ? pending : ""}`,
         "var(--text-error)",
@@ -94,16 +100,36 @@ export class SyncStatusBar {
   private showContextMenu(e: MouseEvent): void {
     const menu = new Menu();
 
-    menu.addItem((item) =>
-      item
-        .setTitle("Sync now")
-        .setIcon("refresh-cw")
-        .onClick(() => {
-          this.plugin.app.commands.executeCommandById(
-            "obsidian-sync:force-sync"
-          );
-        })
-    );
+    if (this.engine?.isPaused) {
+      menu.addItem((item) =>
+        item
+          .setTitle("Resume sync")
+          .setIcon("play")
+          .onClick(() => {
+            this.engine?.resume();
+          })
+      );
+    } else {
+      menu.addItem((item) =>
+        item
+          .setTitle("Pause sync")
+          .setIcon("pause")
+          .onClick(() => {
+            this.engine?.pause();
+          })
+      );
+
+      menu.addItem((item) =>
+        item
+          .setTitle("Sync now")
+          .setIcon("refresh-cw")
+          .onClick(() => {
+            this.plugin.app.commands.executeCommandById(
+              "obsidian-sync:force-sync"
+            );
+          })
+      );
+    }
 
     menu.addItem((item) =>
       item

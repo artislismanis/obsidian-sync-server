@@ -1,6 +1,9 @@
 import { App, Notice, PluginSettingTab, Setting } from "obsidian";
 import type ObsidianSyncPlugin from "./main";
 import { SyncClient, type VaultInfo } from "./sync/client";
+import { ExcludedFoldersModal } from "./ui/excluded-folders-modal";
+import { DeletedFilesModal } from "./ui/deleted-files-modal";
+import { SyncLogModal } from "./ui/sync-log-modal";
 
 export class SyncSettingTab extends PluginSettingTab {
   plugin: ObsidianSyncPlugin;
@@ -176,6 +179,144 @@ export class SyncSettingTab extends PluginSettingTab {
             this.plugin.settings.conflictStrategy = value;
             await this.plugin.saveSettings();
           })
+      );
+
+    // --- Sync Status ---
+    new Setting(containerEl)
+      .setName("Sync status")
+      .setDesc(this.plugin.engine?.isPaused ? "Sync is paused" : "Sync is running")
+      .addButton((btn) =>
+        btn
+          .setButtonText(this.plugin.engine?.isPaused ? "Resume" : "Pause")
+          .onClick(async () => {
+            if (this.plugin.engine?.isPaused) {
+              this.plugin.engine.resume();
+              this.plugin.settings.syncPaused = false;
+            } else {
+              this.plugin.engine?.pause();
+              this.plugin.settings.syncPaused = true;
+            }
+            await this.plugin.saveSettings();
+            this.display();
+          })
+      );
+
+    // --- Activity Log & Deleted Files ---
+    new Setting(containerEl)
+      .setName("Activity log")
+      .setDesc("View recent sync activities for debugging")
+      .addButton((btn) =>
+        btn.setButtonText("View").onClick(() => {
+          const logs = this.plugin.engine?.syncLog ?? [];
+          new SyncLogModal(this.plugin.app, logs).open();
+        })
+      );
+
+    new Setting(containerEl)
+      .setName("Deleted files")
+      .setDesc("View and restore deleted files")
+      .addButton((btn) =>
+        btn.setButtonText("View").onClick(() => {
+          if (this.plugin.client && this.plugin.settings.vaultId) {
+            new DeletedFilesModal(
+              this.plugin.app,
+              this.plugin.client,
+              this.plugin.settings.vaultId
+            ).open();
+          }
+        })
+      );
+
+    // --- Storage Usage ---
+    if (this.plugin.settings.vaultId && this.plugin.client) {
+      const storageEl = containerEl.createDiv();
+      new Setting(storageEl)
+        .setName("Storage usage")
+        .setDesc("Loading...");
+      this.plugin.client.getVaultStorageUsed(this.plugin.settings.vaultId).then((bytes) => {
+        const mb = (bytes / (1024 * 1024)).toFixed(1);
+        storageEl.empty();
+        new Setting(storageEl)
+          .setName("Storage usage")
+          .setDesc(`${mb} MB used`);
+      }).catch(() => {
+        storageEl.querySelector(".setting-item-description")?.setText("Unable to load");
+      });
+    }
+
+    // --- Selective Sync ---
+    containerEl.createEl("h3", { text: "Selective sync" });
+
+    new Setting(containerEl)
+      .setName("Excluded folders")
+      .setDesc("Prevent certain folders from being synced")
+      .addButton((btn) =>
+        btn.setButtonText("Manage").onClick(async () => {
+          const modal = new ExcludedFoldersModal(
+            this.plugin.app,
+            this.plugin.app.vault,
+            this.plugin.settings.excludedFolders
+          );
+          const folders = await modal.waitForResult();
+          this.plugin.settings.excludedFolders = folders;
+          await this.plugin.saveSettings();
+          this.display();
+        })
+      );
+
+    if (this.plugin.settings.excludedFolders.length > 0) {
+      const excList = containerEl.createEl("p", { cls: "setting-item-description" });
+      excList.setText("Excluded: " + this.plugin.settings.excludedFolders.join(", "));
+    }
+
+    new Setting(containerEl)
+      .setName("Sync images")
+      .setDesc("bmp, png, jpg, jpeg, gif, svg, webp, avif")
+      .addToggle((t) =>
+        t.setValue(this.plugin.settings.syncImages).onChange(async (v) => {
+          this.plugin.settings.syncImages = v;
+          await this.plugin.saveSettings();
+        })
+      );
+
+    new Setting(containerEl)
+      .setName("Sync audio")
+      .setDesc("mp3, wav, m4a, flac, ogg, opus")
+      .addToggle((t) =>
+        t.setValue(this.plugin.settings.syncAudio).onChange(async (v) => {
+          this.plugin.settings.syncAudio = v;
+          await this.plugin.saveSettings();
+        })
+      );
+
+    new Setting(containerEl)
+      .setName("Sync videos")
+      .setDesc("mp4, webm, ogv, mov, mkv")
+      .addToggle((t) =>
+        t.setValue(this.plugin.settings.syncVideos).onChange(async (v) => {
+          this.plugin.settings.syncVideos = v;
+          await this.plugin.saveSettings();
+        })
+      );
+
+    new Setting(containerEl)
+      .setName("Sync PDFs")
+      .setDesc("pdf")
+      .addToggle((t) =>
+        t.setValue(this.plugin.settings.syncPDFs).onChange(async (v) => {
+          this.plugin.settings.syncPDFs = v;
+          await this.plugin.saveSettings();
+        })
+      );
+
+    new Setting(containerEl)
+      .setName("Sync all other types")
+      .setDesc("Sync unsupported file types")
+      .addToggle((t) =>
+        t.setValue(this.plugin.settings.syncOtherTypes).onChange(async (v) => {
+          this.plugin.settings.syncOtherTypes = v;
+          await this.plugin.saveSettings();
+        })
       );
   }
 

@@ -18,6 +18,13 @@ interface SyncPluginSettings {
   syncedVaults: string[];
   deviceId: string;
   deviceName: string;
+  syncPaused: boolean;
+  excludedFolders: string[];
+  syncImages: boolean;
+  syncAudio: boolean;
+  syncVideos: boolean;
+  syncPDFs: boolean;
+  syncOtherTypes: boolean;
 }
 
 function generateDeviceId(): string {
@@ -46,6 +53,13 @@ const DEFAULT_SETTINGS: SyncPluginSettings = {
   syncedVaults: [],
   deviceId: "",
   deviceName: "",
+  syncPaused: false,
+  excludedFolders: [],
+  syncImages: true,
+  syncAudio: true,
+  syncVideos: true,
+  syncPDFs: true,
+  syncOtherTypes: false,
 };
 
 export default class ObsidianSyncPlugin extends Plugin {
@@ -150,6 +164,14 @@ export default class ObsidianSyncPlugin extends Plugin {
       client: this.client,
       vault: this.app.vault,
       conflictStrategy: this.settings.conflictStrategy as "keep-both" | "server-wins" | "local-wins",
+      filters: {
+        excludedFolders: this.settings.excludedFolders,
+        syncImages: this.settings.syncImages,
+        syncAudio: this.settings.syncAudio,
+        syncVideos: this.settings.syncVideos,
+        syncPDFs: this.settings.syncPDFs,
+        syncOtherTypes: this.settings.syncOtherTypes,
+      },
     });
 
     this.statusBar?.startMonitoring(this.engine, this.client);

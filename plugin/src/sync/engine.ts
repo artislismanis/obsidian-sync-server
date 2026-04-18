@@ -8,11 +8,26 @@ import { arrayBufferToBase64, base64ToArrayBuffer, sha256Hex } from "../utils/en
 
 export type ConflictStrategy = "keep-both" | "server-wins" | "local-wins";
 
+export interface SyncFilterSettings {
+  excludedFolders: string[];
+  syncImages: boolean;
+  syncAudio: boolean;
+  syncVideos: boolean;
+  syncPDFs: boolean;
+  syncOtherTypes: boolean;
+}
+
+const IMAGE_EXTS = new Set(["bmp", "png", "jpg", "jpeg", "gif", "svg", "webp", "avif"]);
+const AUDIO_EXTS = new Set(["mp3", "wav", "m4a", "3gp", "flac", "ogg", "oga", "opus"]);
+const VIDEO_EXTS = new Set(["mp4", "webm", "ogv", "mov", "mkv"]);
+const PDF_EXTS = new Set(["pdf"]);
+
 export interface SyncEngineConfig {
   vaultId: string;
   client: SyncClient;
   vault: Vault;
   conflictStrategy?: ConflictStrategy;
+  filters?: SyncFilterSettings;
 }
 
 interface FileVersionMap {
@@ -29,6 +44,7 @@ export class SyncEngine {
   private profile: SyncProfile;
   private versions: FileVersionMap = {};
   private syncing = false;
+  private _paused = false;
   private debouncedSync: ReturnType<typeof debounce>;
   private processing = false;
   private _syncLog: string[] = [];
@@ -161,6 +177,7 @@ export class SyncEngine {
   // --- Local file events ---
 
   onFileModify(file: TAbstractFile): void {
+    if (this._paused) return;
     if (!(file instanceof TFile)) return;
     if (this.shouldSkipFile(file)) return;
 
@@ -173,6 +190,7 @@ export class SyncEngine {
   }
 
   onFileCreate(file: TAbstractFile): void {
+    if (this._paused) return;
     if (!(file instanceof TFile)) return;
     if (this.shouldSkipFile(file)) return;
 
@@ -185,6 +203,7 @@ export class SyncEngine {
   }
 
   onFileDelete(file: TAbstractFile): void {
+    if (this._paused) return;
     if (!(file instanceof TFile)) return;
 
     this.queue.enqueue({
@@ -196,6 +215,7 @@ export class SyncEngine {
   }
 
   onFileRename(file: TAbstractFile, oldPath: string): void {
+    if (this._paused) return;
     if (!(file instanceof TFile)) return;
 
     this.queue.enqueue({
@@ -447,7 +467,41 @@ export class SyncEngine {
   private shouldSkipFile(file: TFile): boolean {
     if (file.path.startsWith(".")) return true;
     if (file.path.includes(".conflict-")) return true;
+
+    const filters = this.config.filters;
+    if (filters) {
+      for (const folder of filters.excludedFolders) {
+        if (file.path.startsWith(folder + "/") || file.path === folder) return true;
+      }
+      const ext = file.extension?.toLowerCase() || "";
+      if (IMAGE_EXTS.has(ext) && !filters.syncImages) return true;
+      if (AUDIO_EXTS.has(ext) && !filters.syncAudio) return true;
+      if (VIDEO_EXTS.has(ext) && !filters.syncVideos) return true;
+      if (PDF_EXTS.has(ext) && !filters.syncPDFs) return true;
+      if (ext !== "md" && !IMAGE_EXTS.has(ext) && !AUDIO_EXTS.has(ext) &&
+          !VIDEO_EXTS.has(ext) && !PDF_EXTS.has(ext) && !filters.syncOtherTypes) return true;
+    }
     return false;
+  }
+
+  pause(): void {
+    this._paused = true;
+    this.config.client.disconnectWebSocket();
+    this.debouncedSync.cancel();
+    this.log("Sync paused");
+  }
+
+  resume(): void {
+    this._paused = false;
+    this.config.client.connectWebSocket(this.config.vaultId);
+    this.log("Sync resumed");
+    if (!this.queue.isEmpty()) {
+      this.processQueue();
+    }
+  }
+
+  get isPaused(): boolean {
+    return this._paused;
   }
 
   private log(msg: string): void {

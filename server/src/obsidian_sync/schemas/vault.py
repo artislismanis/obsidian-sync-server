@@ -30,6 +30,7 @@ class VaultResponse(BaseModel):
     obsidian_config_sync: str
     created_at: str
     updated_at: str
+    storage_used_bytes: int = 0
 
     model_config = {"from_attributes": True}
 

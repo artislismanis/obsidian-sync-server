@@ -191,6 +191,28 @@ export class SyncClient {
     );
   }
 
+  async getDeletedFiles(
+    vaultId: string
+  ): Promise<{ files: Record<string, unknown>[] }> {
+    return this.request("GET", `/api/v1/vaults/${vaultId}/deleted-files`) as Promise<{
+      files: Record<string, unknown>[];
+    }>;
+  }
+
+  async restoreDeletedFile(vaultId: string, path: string): Promise<void> {
+    await this.request("POST", `/api/v1/vaults/${vaultId}/deleted-files/restore`, {
+      path,
+    });
+  }
+
+  async getVaultStorageUsed(vaultId: string): Promise<number> {
+    const data = await this.request(
+      "GET",
+      `/api/v1/vaults/${vaultId}`
+    );
+    return (data as Record<string, unknown>).storage_used_bytes as number || 0;
+  }
+
   // --- WebSocket ---
 
   connectWebSocket(vaultId: string): void {

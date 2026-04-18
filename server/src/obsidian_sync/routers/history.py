@@ -3,17 +3,23 @@
 import base64
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from obsidian_sync.database import get_db
 from obsidian_sync.middleware.auth import get_current_user
 from obsidian_sync.models.user import User
+from obsidian_sync.models.vault import VaultRole
 from obsidian_sync.services import history as history_service
 from obsidian_sync.services import sync as sync_service
 from obsidian_sync.services import vault as vault_service
 from obsidian_sync.services.storage_factory import get_local_vault_storage
 
 router = APIRouter(prefix="/api/v1/vaults", tags=["history"])
+
+
+class RestoreDeletedFileRequest(BaseModel):
+    path: str
 
 
 @router.get("/{vault_id}/files/{path:path}/history")
@@ -137,3 +143,51 @@ async def restore_version(
     )
 
     return {"version": new_fv.version, "restored_from": version}
+
+
+@router.get("/{vault_id}/deleted-files")
+async def list_deleted_files(
+    vault_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    vault = await vault_service.get_vault(db, vault_id)
+    if vault is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vault not found")
+
+    role = await vault_service.get_user_vault_role(db, vault_id, current_user.id)
+    if role is None and not current_user.is_superadmin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+
+    deleted = await history_service.get_deleted_files(db, vault_id)
+    return {"deleted_files": deleted}
+
+
+@router.post("/{vault_id}/deleted-files/restore")
+async def restore_deleted_file(
+    vault_id: str,
+    body: RestoreDeletedFileRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    vault = await vault_service.get_vault(db, vault_id)
+    if vault is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vault not found")
+
+    role = await vault_service.get_user_vault_role(db, vault_id, current_user.id)
+    if role not in (VaultRole.owner.value, VaultRole.admin.value, VaultRole.write.value) and not current_user.is_superadmin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Write access required")
+
+    try:
+        new_fv = await history_service.restore_deleted_file(
+            db, vault_id, body.path, current_user.id
+        )
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+    return {
+        "path": body.path,
+        "version": new_fv.version,
+        "content_hash": new_fv.content_hash,
+        "size_bytes": new_fv.size_bytes,
+    }
