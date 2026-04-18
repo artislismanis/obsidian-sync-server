@@ -22,7 +22,7 @@ esbuild
       "@lezer/common",
       "@lezer/highlight",
       "@lezer/lr",
-      ...builtins,
+      ...builtins.filter((m) => m !== "diff"),
     ],
     format: "cjs",
     target: "es2018",
