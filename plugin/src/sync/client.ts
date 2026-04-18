@@ -134,6 +134,11 @@ export class SyncClient {
     return (data.vaults as VaultInfo[]) || [];
   }
 
+  async createVault(name: string): Promise<VaultInfo> {
+    const data = await this.request("POST", "/api/v1/vaults", { name });
+    return data as unknown as VaultInfo;
+  }
+
   async listFiles(
     vaultId: string
   ): Promise<{ files: FileInfo[]; vault_version: number }> {

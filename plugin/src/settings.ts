@@ -1,5 +1,6 @@
 import { App, Notice, PluginSettingTab, Setting } from "obsidian";
 import type ObsidianSyncPlugin from "./main";
+import { SyncClient, type VaultInfo } from "./sync/client";
 
 export class SyncSettingTab extends PluginSettingTab {
   plugin: ObsidianSyncPlugin;
@@ -14,12 +15,13 @@ export class SyncSettingTab extends PluginSettingTab {
     containerEl.empty();
     containerEl.createEl("h2", { text: "Obsidian Sync Settings" });
 
+    // --- Server Connection ---
     new Setting(containerEl)
       .setName("Server URL")
-      .setDesc("URL of your sync server (e.g., https://sync.example.com)")
+      .setDesc("URL of your sync server")
       .addText((text) =>
         text
-          .setPlaceholder("https://sync.example.com")
+          .setPlaceholder("http://your-server:8000")
           .setValue(this.plugin.settings.serverUrl)
           .onChange(async (value) => {
             this.plugin.settings.serverUrl = value.trim();
@@ -27,33 +29,16 @@ export class SyncSettingTab extends PluginSettingTab {
           })
       );
 
-    new Setting(containerEl)
-      .setName("Vault ID")
-      .setDesc("The vault ID on the server to sync with")
-      .addText((text) =>
-        text
-          .setPlaceholder("vault-uuid")
-          .setValue(this.plugin.settings.vaultId)
-          .onChange(async (value) => {
-            this.plugin.settings.vaultId = value.trim();
-            await this.plugin.saveSettings();
-          })
-      );
+    // --- Authentication ---
+    if (!this.plugin.settings.accessToken) {
+      this.renderLoginSection(containerEl);
+    } else {
+      this.renderAuthenticatedSection(containerEl);
+    }
+  }
 
-    new Setting(containerEl)
-      .setName("Auto-sync")
-      .setDesc("Automatically sync on file changes")
-      .addToggle((toggle) =>
-        toggle
-          .setValue(this.plugin.settings.autoSync)
-          .onChange(async (value) => {
-            this.plugin.settings.autoSync = value;
-            await this.plugin.saveSettings();
-          })
-      );
-
-    // Login section
-    containerEl.createEl("h3", { text: "Authentication" });
+  private renderLoginSection(containerEl: HTMLElement): void {
+    containerEl.createEl("h3", { text: "Login" });
 
     let usernameInput = "";
     let passwordInput = "";
@@ -85,7 +70,6 @@ export class SyncSettingTab extends PluginSettingTab {
             return;
           }
           try {
-            const { SyncClient } = await import("./sync/client");
             const client = new SyncClient({
               serverUrl: this.plugin.settings.serverUrl,
               accessToken: "",
@@ -96,23 +80,155 @@ export class SyncSettingTab extends PluginSettingTab {
             this.plugin.settings.refreshToken = tokens.refresh_token;
             await this.plugin.saveSettings();
             new Notice("Login successful!");
-
-            // Start sync if vault ID is set
-            if (this.plugin.settings.vaultId) {
-              await this.plugin.startSync();
-            }
+            this.display();
           } catch (e) {
             new Notice(`Login failed: ${e}`);
           }
         })
     );
+  }
 
-    // Connection status
-    if (this.plugin.settings.accessToken) {
-      containerEl.createEl("p", {
-        text: "Status: Authenticated",
+  private renderAuthenticatedSection(containerEl: HTMLElement): void {
+    new Setting(containerEl)
+      .setName("Authenticated")
+      .setDesc("Connected to server")
+      .addButton((btn) =>
+        btn.setButtonText("Logout").onClick(async () => {
+          this.plugin.settings.accessToken = "";
+          this.plugin.settings.refreshToken = "";
+          this.plugin.settings.vaultId = "";
+          this.plugin.stopSync();
+          await this.plugin.saveSettings();
+          this.display();
+        })
+      );
+
+    // --- Vault Selection ---
+    containerEl.createEl("h3", { text: "Vault" });
+
+    if (this.plugin.settings.vaultId) {
+      new Setting(containerEl)
+        .setName("Connected vault")
+        .setDesc(this.plugin.settings.vaultId)
+        .addButton((btn) =>
+          btn.setButtonText("Disconnect").onClick(async () => {
+            this.plugin.settings.vaultId = "";
+            this.plugin.stopSync();
+            await this.plugin.saveSettings();
+            this.display();
+          })
+        );
+    } else {
+      const vaultListEl = containerEl.createDiv({ cls: "vault-list-container" });
+      vaultListEl.createEl("p", { text: "Loading vaults...", cls: "setting-item-description" });
+      this.loadVaultList(vaultListEl);
+    }
+
+    // --- Sync Settings ---
+    containerEl.createEl("h3", { text: "Sync" });
+
+    new Setting(containerEl)
+      .setName("Auto-sync")
+      .setDesc("Automatically sync on file changes")
+      .addToggle((toggle) =>
+        toggle
+          .setValue(this.plugin.settings.autoSync)
+          .onChange(async (value) => {
+            this.plugin.settings.autoSync = value;
+            await this.plugin.saveSettings();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName("Conflict strategy")
+      .setDesc("How to handle files that differ between local and server")
+      .addDropdown((drop) =>
+        drop
+          .addOption("keep-both", "Keep both (conflict copy)")
+          .addOption("server-wins", "Server wins")
+          .addOption("local-wins", "Local wins")
+          .setValue(this.plugin.settings.conflictStrategy || "keep-both")
+          .onChange(async (value) => {
+            this.plugin.settings.conflictStrategy = value;
+            await this.plugin.saveSettings();
+          })
+      );
+  }
+
+  private async loadVaultList(container: HTMLElement): Promise<void> {
+    try {
+      const client = new SyncClient({
+        serverUrl: this.plugin.settings.serverUrl,
+        accessToken: this.plugin.settings.accessToken,
+        refreshToken: this.plugin.settings.refreshToken,
+      });
+
+      const data = await client.listVaults();
+      container.empty();
+
+      if (data.length > 0) {
+        container.createEl("p", {
+          text: "Select a vault to sync with, or create a new one:",
+          cls: "setting-item-description",
+        });
+
+        for (const vault of data) {
+          new Setting(container)
+            .setName(vault.name)
+            .setDesc(`${vault.storage_backend} · ${vault.encrypted ? "encrypted" : "unencrypted"} · ${vault.sync_mode}`)
+            .addButton((btn) =>
+              btn
+                .setButtonText("Connect")
+                .setCta()
+                .onClick(async () => {
+                  await this.connectToVault(vault.id);
+                })
+            );
+        }
+      } else {
+        container.createEl("p", {
+          text: "No vaults on the server yet. Create one:",
+          cls: "setting-item-description",
+        });
+      }
+
+      // Create new vault
+      let newVaultName = "";
+      new Setting(container)
+        .setName("Create new vault")
+        .addText((text) =>
+          text.setPlaceholder("Vault name").onChange((value) => {
+            newVaultName = value;
+          })
+        )
+        .addButton((btn) =>
+          btn.setButtonText("Create").onClick(async () => {
+            if (!newVaultName.trim()) {
+              new Notice("Enter a vault name");
+              return;
+            }
+            try {
+              const resp = await client.createVault(newVaultName.trim());
+              new Notice(`Vault "${newVaultName}" created!`);
+              await this.connectToVault(resp.id);
+            } catch (e) {
+              new Notice(`Failed to create vault: ${e}`);
+            }
+          })
+        );
+    } catch (e) {
+      container.empty();
+      container.createEl("p", {
+        text: `Failed to load vaults: ${e}`,
         cls: "setting-item-description",
       });
     }
+  }
+
+  private async connectToVault(vaultId: string): Promise<void> {
+    this.plugin.settings.vaultId = vaultId;
+    await this.plugin.saveSettings();
+    await this.plugin.startSync();
+    this.display();
   }
 }

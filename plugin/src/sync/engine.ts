@@ -6,10 +6,13 @@ import { getSyncProfile, SyncProfile, isMobile } from "./platform";
 import { debounce } from "../utils/debounce";
 import { arrayBufferToBase64, base64ToArrayBuffer, sha256Hex } from "../utils/encoding";
 
+export type ConflictStrategy = "keep-both" | "server-wins" | "local-wins";
+
 export interface SyncEngineConfig {
   vaultId: string;
   client: SyncClient;
   vault: Vault;
+  conflictStrategy?: ConflictStrategy;
 }
 
 interface FileVersionMap {
@@ -382,29 +385,61 @@ export class SyncEngine {
     const path = data.path as string;
     if (!path) return;
 
+    const strategy = this.config.conflictStrategy || "keep-both";
     const file = this.config.vault.getAbstractFileByPath(path);
     if (!(file instanceof TFile)) return;
 
-    // Save local version as conflict file
+    if (strategy === "local-wins") {
+      const content = await this.config.vault.readBinary(file);
+      const b64 = arrayBufferToBase64(content);
+      const hash = await sha256Hex(content);
+      this.config.client.sendMessage({
+        type: "file_save",
+        path,
+        content: b64,
+        version: 0,
+        content_hash: hash,
+      });
+      this.log(`⚡ ${path} — conflict resolved: local wins`);
+      this._stats.uploaded++;
+      new Notice(`Sync conflict: ${path} — local version kept`);
+      return;
+    }
+
+    if (strategy === "server-wins") {
+      try {
+        const server = await this.config.client.downloadFile(
+          this.config.vaultId, path
+        );
+        await this.config.vault.modifyBinary(file, server.content);
+        this.versions[path] = server.version;
+        this.log(`⚡ ${path} — conflict resolved: server wins`);
+        this._stats.downloaded++;
+        new Notice(`Sync conflict: ${path} — server version kept`);
+      } catch {
+        // Will retry on next sync
+      }
+      return;
+    }
+
+    // keep-both: save local as conflict file, pull server version
     const content = await this.config.vault.readBinary(file);
     const cPath = conflictPath(path);
     await this.config.vault.createBinary(cPath, content);
+    this.log(`⚡ ${path} — conflict: local saved as ${cPath}`);
 
-    new Notice(
-      `Sync conflict: ${path}\nYour version saved as ${cPath}`
-    );
-
-    // Pull server version
     try {
       const server = await this.config.client.downloadFile(
-        this.config.vaultId,
-        path
+        this.config.vaultId, path
       );
       await this.config.vault.modifyBinary(file, server.content);
       this.versions[path] = server.version;
+      this._stats.downloaded++;
     } catch {
-      // Will retry on next sync
+      // Will retry
     }
+
+    new Notice(`Sync conflict: ${path}\nYour version saved as ${cPath}`);
   }
 
   // --- Helpers ---

@@ -4,6 +4,7 @@ import { SyncClient, SyncServerConfig } from "./sync/client";
 import { SyncEngine } from "./sync/engine";
 import { SyncStatusBar } from "./ui/status-bar";
 import { SyncLogModal } from "./ui/sync-log-modal";
+import { FirstSyncModal } from "./ui/first-sync-modal";
 
 interface SyncPluginSettings {
   serverUrl: string;
@@ -11,6 +12,8 @@ interface SyncPluginSettings {
   refreshToken: string;
   vaultId: string;
   autoSync: boolean;
+  conflictStrategy: string;
+  hasCompletedFirstSync: boolean;
 }
 
 const DEFAULT_SETTINGS: SyncPluginSettings = {
@@ -19,6 +22,8 @@ const DEFAULT_SETTINGS: SyncPluginSettings = {
   refreshToken: "",
   vaultId: "",
   autoSync: true,
+  conflictStrategy: "keep-both",
+  hasCompletedFirstSync: false,
 };
 
 export default class ObsidianSyncPlugin extends Plugin {
@@ -76,10 +81,39 @@ export default class ObsidianSyncPlugin extends Plugin {
 
     if (!this.settings.vaultId) return;
 
+    // First-sync confirmation: show modal if vault has local files and this is the first connection
+    if (!this.settings.hasCompletedFirstSync) {
+      const localFiles = this.app.vault.getFiles().filter(
+        (f) => !f.path.startsWith(".") && !f.path.includes(".conflict-")
+      );
+
+      let serverFileCount = 0;
+      try {
+        const serverData = await this.client.listFiles(this.settings.vaultId);
+        serverFileCount = serverData.files.length;
+      } catch {
+        // New vault or unreachable — proceed
+      }
+
+      if (localFiles.length > 0 || serverFileCount > 0) {
+        const modal = new FirstSyncModal(this.app, localFiles.length, serverFileCount);
+        const result = await modal.waitForResult();
+        if (!result.confirmed) return;
+
+        this.settings.conflictStrategy = result.strategy;
+        this.settings.hasCompletedFirstSync = true;
+        await this.saveSettings();
+      } else {
+        this.settings.hasCompletedFirstSync = true;
+        await this.saveSettings();
+      }
+    }
+
     this.engine = new SyncEngine({
       vaultId: this.settings.vaultId,
       client: this.client,
       vault: this.app.vault,
+      conflictStrategy: this.settings.conflictStrategy as "keep-both" | "server-wins" | "local-wins",
     });
 
     this.statusBar?.startMonitoring(this.engine, this.client);
