@@ -29,6 +29,7 @@ export class SyncEngine {
   private debouncedSync: ReturnType<typeof debounce>;
   private processing = false;
   private _syncLog: string[] = [];
+  private _stats = { uploaded: 0, downloaded: 0, deleted: 0 };
 
   constructor(config: SyncEngineConfig) {
     this.config = config;
@@ -98,6 +99,7 @@ export class SyncEngine {
           );
           await this.config.vault.createBinary(path, content);
           this.log(`↓ ${path} (v${info.version}) — new from server`);
+          this._stats.downloaded++;
           pulled++;
         } catch {
           this.log(`✗ Failed to pull ${path}`);
@@ -146,7 +148,6 @@ export class SyncEngine {
 
     const total = serverFiles.size + pushed;
     this.log(`Initial sync: ${pulled} pulled, ${pushed} pushed, ${serverFiles.size} on server`);
-    new Notice(`Sync: ${pulled} pulled, ${pushed} pushed (${serverFiles.size} on server)`);
   }
 
   stop(): void {
@@ -270,6 +271,7 @@ export class SyncEngine {
             content_hash: hash,
           });
           this.log(`↑ ${change.path} (v${version + 1})`);
+          this._stats.uploaded++;
         } else {
           // Fall back to REST
           const result = await client.uploadFile(
@@ -280,6 +282,7 @@ export class SyncEngine {
           );
           this.versions[change.path] = result.version;
           this.log(`↑ ${change.path} (v${result.version}) via REST`);
+          this._stats.uploaded++;
         }
         break;
       }
@@ -335,9 +338,11 @@ export class SyncEngine {
     if (existing instanceof TFile) {
       await this.config.vault.modifyBinary(existing, content);
       this.log(`↓ ${path} updated (v${version})`);
+      this._stats.downloaded++;
     } else {
       await this.config.vault.createBinary(path, content);
       this.log(`↓ ${path} created (v${version})`);
+      this._stats.downloaded++;
     }
   }
 
@@ -422,6 +427,10 @@ export class SyncEngine {
 
   get trackedFileCount(): number {
     return Object.keys(this.versions).length;
+  }
+
+  get stats(): { uploaded: number; downloaded: number; deleted: number } {
+    return { ...this._stats };
   }
 
   get syncLog(): string[] {
